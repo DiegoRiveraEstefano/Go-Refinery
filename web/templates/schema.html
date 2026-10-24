@@ -3,7 +3,7 @@
   <header class="l-cluster">
     <div>
       <h2>Schema &amp; Cleaning Pipeline: <code>{{ .Dataset.OriginalName }}</code></h2>
-      <p>Configure target column types and cleaning rules. Available rules filter automatically based on each column's selected type.</p>
+      <p>Select a column on the left and stack transformation blocks in execution order. Block 1 defines the target data type by default.</p>
     </div>
     <dl class="l-cluster">
       <div><dt>Dataset ID</dt><dd class="u-mono">{{ .Dataset.ID }}</dd></div>
@@ -14,79 +14,183 @@
 
   <refinery-schema-editor>
     <form action="/datasets/{{ .Dataset.ID }}/schema" method="post" up-submit up-target="main" class="l-stack">
-      <fieldset>
-        <legend>Inferred Columns &amp; Type-Specific Transformation Rules</legend>
-        <div class="l-table-scroll">
-          <table>
-            <thead>
-              <tr>
-                <th scope="col">#</th>
-                <th scope="col">Column Header &amp; Key</th>
-                <th scope="col">Inferred</th>
-                <th scope="col">Target Type</th>
-                <th scope="col" class="u-text-center">Nullable</th>
-                <th scope="col">Transformation &amp; Validation Rules</th>
-                <th scope="col">Sample Preview</th>
-              </tr>
-            </thead>
-            <tbody>
-              {{ range $col := .Columns }}
-              <tr data-col-row="{{ $col.Index }}">
-                <td class="u-mono u-text-right">{{ $col.Index }}</td>
-                <td>
-                  <div class="l-stack" data-compact>
-                    <strong>{{ $col.OriginalName }}</strong>
-                    <input type="text" name="col_{{ $col.Index }}_name" value="{{ $col.NormalizedName }}" class="u-mono" aria-label="Normalized key for {{ $col.OriginalName }}" required>
+      <input type="hidden" name="active_col" value="{{ .ActiveCol }}" data-role="active-col-input">
+
+      <div class="l-sidebar">
+        <aside aria-label="Dataset Columns" class="l-stack" data-compact>
+          <header class="l-cluster">
+            <h3>Columns</h3>
+            <span class="u-badge u-mono">{{ len .Columns }}</span>
+          </header>
+          <nav aria-label="Column selector" data-role="col-nav" class="l-stack" data-compact>
+            {{ range $col := .Columns }}
+            <button
+              type="button"
+              data-role="col-tab"
+              data-col-index="{{ $col.Index }}"
+              aria-selected="{{ if eq $col.Index $.ActiveCol }}true{{ else }}false{{ end }}">
+              <span data-role="col-tab-title">
+                <small class="u-mono">#{{ $col.Index }}</small>
+                <strong>{{ $col.OriginalName }}</strong>
+                <small class="u-mono" data-role="col-tab-key">{{ $col.NormalizedName }}</small>
+              </span>
+              <span data-role="col-tab-meta">
+                <span class="u-badge u-mono" data-role="col-tab-type">{{ $col.TargetType }}</span>
+                <output class="u-badge u-mono" data-role="col-tab-count">+{{ len $col.AppliedBlocks }}</output>
+                <span class="u-badge" data-role="col-tab-warn" hidden title="Column has incompatible modifier blocks">!</span>
+              </span>
+            </button>
+            {{ end }}
+          </nav>
+        </aside>
+
+        <div data-role="col-panels" class="l-stack">
+          {{ range $col := .Columns }}
+          <fieldset
+            data-col-panel="{{ $col.Index }}"
+            data-col-index="{{ $col.Index }}"
+            class="l-stack"
+            {{ if ne $col.Index $.ActiveCol }}hidden{{ end }}>
+            <legend>Column #{{ $col.Index }} Pipeline &mdash; <code>{{ $col.OriginalName }}</code></legend>
+
+            <header class="l-cluster">
+              <dl class="l-cluster">
+                <div>
+                  <dt>Inferred Type</dt>
+                  <dd><span class="u-badge u-mono">{{ $col.InferredType }}</span></dd>
+                </div>
+                <div>
+                  <dt>Nulls in Sample</dt>
+                  <dd class="u-mono">{{ $col.NullCount }}</dd>
+                </div>
+                <div>
+                  <dt>Distinct Sample</dt>
+                  <dd class="u-mono">{{ $col.SampleDistinct }}</dd>
+                </div>
+              </dl>
+
+              <div class="l-stack" data-compact>
+                <small>Raw Sample Values</small>
+                <div class="l-cluster u-mono">
+                  {{ range $col.SampleValues }}<code>{{ . }}</code>{{ else }}<small>empty</small>{{ end }}
+                </div>
+              </div>
+            </header>
+
+            <ol data-role="block-stack" class="l-stack">
+              <li data-block-card data-block-kind="base">
+                <div class="l-cluster">
+                  <div class="l-cluster">
+                    <span class="u-badge u-mono" data-role="step-badge">Block 1</span>
+                    <strong>Select Data Type &amp; Column Key</strong>
+                    <span class="u-badge" data-role="base-lock-badge">Default Base</span>
                   </div>
-                </td>
-                <td>
-                  <span class="u-badge u-mono" data-type="{{ $col.InferredType }}">{{ $col.InferredType }}</span>
-                  <small class="u-block">{{ $col.NullCount }} nulls &middot; {{ $col.SampleDistinct }} distinct</small>
-                </td>
-                <td>
-                  <select name="col_{{ $col.Index }}_type" data-role="type-selector" aria-label="Target type for {{ $col.OriginalName }}">
-                    {{ range $t := $.AllTypes }}
-                    <option value="{{ $t }}" {{ if eq $t $col.TargetType }}selected{{ end }}>{{ $t }}</option>
-                    {{ end }}
-                  </select>
-                </td>
-                <td class="u-text-center">
-                  <input type="checkbox" name="col_{{ $col.Index }}_nullable" value="1" aria-label="Nullable" {{ if $col.Nullable }}checked{{ end }}>
-                </td>
-                <td>
-                  <div class="l-cluster" data-role="rules-group">
-                    {{ range $rule := $col.AvailableRules }}
-                    <label
-                      data-rule-chip
-                      data-category="{{ $rule.Category }}"
-                      data-supported-types="{{ $rule.SupportedCSV }}"
-                      title="{{ $rule.Description }}"
-                      {{ if not $rule.VisibleInitial }}hidden{{ end }}>
+                  <small>Initial column definition &middot; determines compatible modifiers below</small>
+                </div>
+
+                <div class="l-filter-builder">
+                  <label>
+                    <small>Target Data Type</small>
+                    <select
+                      name="col_{{ $col.Index }}_type"
+                      data-role="type-selector"
+                      aria-label="Target type for {{ $col.OriginalName }}">
+                      {{ range $t := $.AllTypes }}
+                      <option value="{{ $t }}" {{ if eq $t $col.TargetType }}selected{{ end }}>{{ $t }}</option>
+                      {{ end }}
+                    </select>
+                  </label>
+
+                  <label class="l-filter-value">
+                    <small>Normalized Column Key</small>
+                    <input
+                      type="text"
+                      name="col_{{ $col.Index }}_name"
+                      value="{{ $col.NormalizedName }}"
+                      data-role="key-input"
+                      class="u-mono"
+                      aria-label="Normalized key for {{ $col.OriginalName }}"
+                      required>
+                  </label>
+
+                  <label data-role="nullable-toggle">
+                    <small>Null Policy</small>
+                    <span>
                       <input
                         type="checkbox"
-                        name="col_{{ $col.Index }}_rules"
-                        value="{{ $rule.Type }}"
-                        {{ if $rule.Checked }}checked{{ end }}
-                        {{ if not $rule.VisibleInitial }}disabled{{ end }}>
-                      <span>{{ $rule.Label }}</span>
-                    </label>
-                    {{ end }}
-                  </div>
-                </td>
-                <td class="u-mono">
+                        name="col_{{ $col.Index }}_nullable"
+                        value="1"
+                        aria-label="Nullable for {{ $col.OriginalName }}"
+                        {{ if $col.Nullable }}checked{{ end }}>
+                      Allow NULL
+                    </span>
+                  </label>
+                </div>
+              </li>
+
+              {{ range $rule := $col.AppliedBlocks }}
+              <li
+                data-block-card
+                data-block-kind="stage"
+                data-rule-type="{{ $rule.Type }}"
+                data-category="{{ $rule.Category }}"
+                data-supported-types="{{ $rule.SupportedCSV }}"
+                data-compatible="{{ if $rule.VisibleInitial }}true{{ else }}false{{ end }}"
+                draggable="true">
+                <input
+                  type="hidden"
+                  name="col_{{ $col.Index }}_rules"
+                  value="{{ $rule.Type }}"
+                  {{ if not $rule.VisibleInitial }}disabled{{ end }}>
+                <div class="l-cluster">
                   <div class="l-cluster">
-                    {{ range $col.SampleValues }}<code>{{ . }}</code>{{ else }}<small>empty</small>{{ end }}
+                    <span data-role="drag-handle" aria-hidden="true" title="Drag block to reorder">&#8942;&#8942;</span>
+                    <span class="u-badge u-mono" data-role="step-badge">Block</span>
+                    <strong>{{ $rule.Label }}</strong>
+                    <span class="u-badge u-mono" data-category-badge="{{ $rule.Category }}">{{ $rule.Category }}</span>
                   </div>
-                </td>
-              </tr>
+                  <div class="l-cluster" data-role="block-actions">
+                    <button type="button" data-variant="secondary" data-role="move-block-up" aria-label="Move {{ $rule.Label }} up" title="Move block up">&uarr;</button>
+                    <button type="button" data-variant="secondary" data-role="move-block-down" aria-label="Move {{ $rule.Label }} down" title="Move block down">&darr;</button>
+                    <button type="button" data-variant="secondary" data-role="remove-block" aria-label="Remove {{ $rule.Label }}" title="Remove block">&times;</button>
+                  </div>
+                </div>
+                <p>{{ $rule.Description }}</p>
+                <small data-role="incompatible-notice" {{ if $rule.VisibleInitial }}hidden{{ end }}>
+                  Incompatible with selected Target Data Type &mdash; preserved in stack but excluded from execution until removed or type is restored (supports: {{ $rule.SupportedCSV }}).
+                </small>
+              </li>
               {{ end }}
-            </tbody>
-          </table>
+            </ol>
+
+            <div data-role="stage-adder" class="l-filter-builder">
+              <label class="l-filter-value">
+                <small>Stack Modifier Block (Stage)</small>
+                <select data-role="stage-picker" aria-label="Add modifier block for {{ $col.OriginalName }}">
+                  <option value="">+ Select a modifier block to stack...</option>
+                  {{ range $rule := $col.AvailableRules }}
+                  <option
+                    value="{{ $rule.Type }}"
+                    data-label="{{ $rule.Label }}"
+                    data-description="{{ $rule.Description }}"
+                    data-category="{{ $rule.Category }}"
+                    data-supported-types="{{ $rule.SupportedCSV }}"
+                    {{ if not $rule.VisibleInitial }}hidden disabled{{ end }}>
+                    [{{ $rule.Category }}] {{ $rule.Label }} &mdash; {{ $rule.Description }}
+                  </option>
+                  {{ end }}
+                </select>
+              </label>
+              <button type="button" data-variant="secondary" data-role="add-stage-btn">+ Stack Block</button>
+            </div>
+          </fieldset>
+          {{ end }}
         </div>
-      </fieldset>
+      </div>
 
       <footer class="l-cluster">
-        <button type="submit" data-variant="secondary">Save Schema &amp; Rules</button>
+        <small>Blocks execute top-to-bottom per column. Incompatible blocks are skipped until resolved.</small>
+        <button type="submit" data-variant="secondary">Save Schema &amp; Pipeline Blocks</button>
       </footer>
     </form>
   </refinery-schema-editor>

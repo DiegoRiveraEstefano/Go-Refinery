@@ -41,66 +41,403 @@ class RefineryDropzone extends HTMLElement {
 
 class RefinerySchemaEditor extends HTMLElement {
   connectedCallback() {
-    this.syncAllRows();
+    this.draggedBlock = null;
+    this.syncAllPanels();
 
-    this.onChange = (e) => {
-      const target = e.target;
-      if (target && target.matches('select[data-role="type-selector"]')) {
-        const row = target.closest("tr[data-col-row]");
-        if (row) {
-          this.syncRowRules(row, target.value);
-        }
+    this.onClick = (e) => {
+      const tabBtn = e.target.closest('button[data-role="col-tab"]');
+      if (tabBtn) {
+        this.selectColumn(tabBtn.getAttribute("data-col-index"));
+        return;
       }
-      if (target && target.matches('label[data-rule-chip] input[type="checkbox"]')) {
-        const chip = target.closest("label[data-rule-chip]");
-        if (chip) {
-          chip.setAttribute("data-active", target.checked ? "true" : "false");
+
+      const addBtn = e.target.closest('button[data-role="add-stage-btn"]');
+      if (addBtn) {
+        const panel = addBtn.closest("fieldset[data-col-panel]");
+        if (panel) {
+          this.addSelectedStage(panel);
+        }
+        return;
+      }
+
+      const moveUpBtn = e.target.closest('button[data-role="move-block-up"]');
+      if (moveUpBtn) {
+        const block = moveUpBtn.closest('li[data-block-kind="stage"]');
+        const panel = moveUpBtn.closest("fieldset[data-col-panel]");
+        if (block && panel) {
+          this.moveBlock(panel, block, -1);
+        }
+        return;
+      }
+
+      const moveDownBtn = e.target.closest('button[data-role="move-block-down"]');
+      if (moveDownBtn) {
+        const block = moveDownBtn.closest('li[data-block-kind="stage"]');
+        const panel = moveDownBtn.closest("fieldset[data-col-panel]");
+        if (block && panel) {
+          this.moveBlock(panel, block, 1);
+        }
+        return;
+      }
+
+      const removeBtn = e.target.closest('button[data-role="remove-block"]');
+      if (removeBtn) {
+        const block = removeBtn.closest('li[data-block-kind="stage"]');
+        const panel = removeBtn.closest("fieldset[data-col-panel]");
+        if (block && panel) {
+          block.remove();
+          this.syncPanel(panel);
         }
       }
     };
 
+    this.onChange = (e) => {
+      const target = e.target;
+      if (!target) return;
+
+      if (target.matches('select[data-role="type-selector"]')) {
+        const panel = target.closest("fieldset[data-col-panel]");
+        if (panel) {
+          this.syncPanel(panel);
+        }
+      }
+    };
+
+    this.onInput = (e) => {
+      const target = e.target;
+      if (target && target.matches('input[data-role="key-input"]')) {
+        const panel = target.closest("fieldset[data-col-panel]");
+        if (panel) {
+          this.syncSidebarTab(panel);
+        }
+      }
+    };
+
+    this.onDragStart = (e) => {
+      const block = e.target.closest('li[data-block-kind="stage"]');
+      if (!block) return;
+      this.draggedBlock = block;
+      block.setAttribute("data-dragging", "true");
+      if (e.dataTransfer) {
+        e.dataTransfer.effectAllowed = "move";
+        e.dataTransfer.setData("text/plain", block.getAttribute("data-rule-type") || "");
+      }
+    };
+
+    this.onDragOver = (e) => {
+      if (!this.draggedBlock) return;
+      const targetBlock = e.target.closest('li[data-block-kind="stage"]');
+      if (!targetBlock || targetBlock === this.draggedBlock) return;
+
+      const sourceStack = this.draggedBlock.parentElement;
+      if (targetBlock.parentElement !== sourceStack) return;
+
+      e.preventDefault();
+      if (e.dataTransfer) {
+        e.dataTransfer.dropEffect = "move";
+      }
+
+      const rect = targetBlock.getBoundingClientRect();
+      const offset = e.clientY - rect.top;
+      if (offset < rect.height / 2) {
+        sourceStack.insertBefore(this.draggedBlock, targetBlock);
+      } else {
+        sourceStack.insertBefore(this.draggedBlock, targetBlock.nextSibling);
+      }
+    };
+
+    this.onDragEnd = () => {
+      if (!this.draggedBlock) return;
+      const panel = this.draggedBlock.closest("fieldset[data-col-panel]");
+      this.draggedBlock.removeAttribute("data-dragging");
+      this.draggedBlock = null;
+      if (panel) {
+        this.syncPanel(panel);
+      }
+    };
+
+    this.addEventListener("click", this.onClick);
     this.addEventListener("change", this.onChange);
+    this.addEventListener("input", this.onInput);
+    this.addEventListener("dragstart", this.onDragStart);
+    this.addEventListener("dragover", this.onDragOver);
+    this.addEventListener("dragend", this.onDragEnd);
   }
 
   disconnectedCallback() {
-    if (this.onChange) {
-      this.removeEventListener("change", this.onChange);
+    if (this.onClick) this.removeEventListener("click", this.onClick);
+    if (this.onChange) this.removeEventListener("change", this.onChange);
+    if (this.onInput) this.removeEventListener("input", this.onInput);
+    if (this.onDragStart) this.removeEventListener("dragstart", this.onDragStart);
+    if (this.onDragOver) this.removeEventListener("dragover", this.onDragOver);
+    if (this.onDragEnd) this.removeEventListener("dragend", this.onDragEnd);
+  }
+
+  selectColumn(colIndex) {
+    if (colIndex === null || colIndex === undefined) return;
+    const activeInput = this.querySelector('input[data-role="active-col-input"]');
+    if (activeInput) {
+      activeInput.value = String(colIndex);
+    }
+
+    const tabs = this.querySelectorAll('button[data-role="col-tab"]');
+    tabs.forEach((tab) => {
+      const isSelected = tab.getAttribute("data-col-index") === String(colIndex);
+      tab.setAttribute("aria-selected", isSelected ? "true" : "false");
+    });
+
+    const panels = this.querySelectorAll("fieldset[data-col-panel]");
+    panels.forEach((panel) => {
+      const isMatch = panel.getAttribute("data-col-panel") === String(colIndex);
+      if (isMatch) {
+        panel.removeAttribute("hidden");
+      } else {
+        panel.setAttribute("hidden", "");
+      }
+    });
+  }
+
+  syncAllPanels() {
+    const panels = this.querySelectorAll("fieldset[data-col-panel]");
+    panels.forEach((panel) => this.syncPanel(panel));
+  }
+
+  syncPanel(panel) {
+    const select = panel.querySelector('select[data-role="type-selector"]');
+    const selectedType = select ? select.value : "STRING";
+    const stack = panel.querySelector('ol[data-role="block-stack"]');
+    const stageBlocks = stack ? Array.from(stack.querySelectorAll('li[data-block-kind="stage"]')) : [];
+    const activeRuleTypes = new Set();
+
+    stageBlocks.forEach((block, idx) => {
+      const ruleType = block.getAttribute("data-rule-type") || "";
+      activeRuleTypes.add(ruleType);
+
+      const stepBadge = block.querySelector('[data-role="step-badge"]');
+      if (stepBadge) {
+        stepBadge.textContent = `Block ${idx + 2}`;
+      }
+
+      const upBtn = block.querySelector('button[data-role="move-block-up"]');
+      const downBtn = block.querySelector('button[data-role="move-block-down"]');
+      if (upBtn) upBtn.disabled = idx === 0;
+      if (downBtn) downBtn.disabled = idx === stageBlocks.length - 1;
+
+      const rawSupported = block.getAttribute("data-supported-types") || "";
+      const supported = rawSupported
+        .split(",")
+        .map((s) => s.trim())
+        .filter(Boolean);
+      const isCompatible = supported.includes(selectedType);
+
+      block.setAttribute("data-compatible", isCompatible ? "true" : "false");
+      const hiddenInput = block.querySelector('input[type="hidden"]');
+      if (hiddenInput) {
+        hiddenInput.disabled = !isCompatible;
+      }
+
+      const notice = block.querySelector('[data-role="incompatible-notice"]');
+      if (notice) {
+        if (isCompatible) {
+          notice.setAttribute("hidden", "");
+        } else {
+          notice.removeAttribute("hidden");
+        }
+      }
+    });
+
+    const picker = panel.querySelector('select[data-role="stage-picker"]');
+    if (picker) {
+      const options = picker.querySelectorAll("option[ value ]");
+      options.forEach((opt) => {
+        const val = opt.getAttribute("value");
+        if (!val) return;
+        const rawSupported = opt.getAttribute("data-supported-types") || "";
+        const supported = rawSupported
+          .split(",")
+          .map((s) => s.trim())
+          .filter(Boolean);
+        const isCompatible = supported.includes(selectedType);
+        const isAlreadyStacked = activeRuleTypes.has(val);
+        const baseLabel = `[${opt.getAttribute("data-category")}] ${opt.getAttribute("data-label")} — ${opt.getAttribute("data-description")}`;
+
+        if (!isCompatible) {
+          opt.setAttribute("hidden", "");
+          opt.disabled = true;
+          opt.textContent = baseLabel;
+        } else {
+          opt.removeAttribute("hidden");
+          opt.disabled = isAlreadyStacked;
+          opt.textContent = isAlreadyStacked ? `${baseLabel} (Stacked)` : baseLabel;
+        }
+      });
+
+      if (picker.selectedOptions.length > 0 && picker.selectedOptions[0].disabled) {
+        picker.value = "";
+      }
+    }
+
+    this.syncSidebarTab(panel);
+  }
+
+  syncSidebarTab(panel) {
+    const colIndex = panel.getAttribute("data-col-panel");
+    const tab = this.querySelector(`button[data-role="col-tab"][data-col-index="${colIndex}"]`);
+    if (!tab) return;
+
+    const select = panel.querySelector('select[data-role="type-selector"]');
+    const keyInput = panel.querySelector('input[data-role="key-input"]');
+    const stageBlocks = panel.querySelectorAll('li[data-block-kind="stage"]');
+    const incompatibleBlocks = panel.querySelectorAll('li[data-block-kind="stage"][data-compatible="false"]');
+
+    const typeBadge = tab.querySelector('[data-role="col-tab-type"]');
+    if (typeBadge && select) {
+      typeBadge.textContent = select.value;
+    }
+
+    const keyLabel = tab.querySelector('[data-role="col-tab-key"]');
+    if (keyLabel && keyInput) {
+      keyLabel.textContent = keyInput.value;
+    }
+
+    const countBadge = tab.querySelector('[data-role="col-tab-count"]');
+    if (countBadge) {
+      countBadge.textContent = `+${stageBlocks.length}`;
+    }
+
+    const warnBadge = tab.querySelector('[data-role="col-tab-warn"]');
+    if (warnBadge) {
+      if (incompatibleBlocks.length > 0) {
+        warnBadge.removeAttribute("hidden");
+      } else {
+        warnBadge.setAttribute("hidden", "");
+      }
     }
   }
 
-  syncAllRows() {
-    const rows = this.querySelectorAll("tr[data-col-row]");
-    rows.forEach((row) => {
-      const select = row.querySelector('select[data-role="type-selector"]');
-      if (select) {
-        this.syncRowRules(row, select.value);
-      }
-    });
+  addSelectedStage(panel) {
+    const picker = panel.querySelector('select[data-role="stage-picker"]');
+    const stack = panel.querySelector('ol[data-role="block-stack"]');
+    if (!picker || !stack || !picker.value) {
+      if (picker) picker.focus();
+      return;
+    }
+
+    const opt = picker.selectedOptions[0];
+    if (!opt || opt.disabled) return;
+
+    const colIndex = panel.getAttribute("data-col-panel");
+    const ruleType = opt.value;
+    const label = opt.getAttribute("data-label") || ruleType;
+    const description = opt.getAttribute("data-description") || "";
+    const category = opt.getAttribute("data-category") || "COMMON";
+    const supportedCSV = opt.getAttribute("data-supported-types") || "";
+
+    const li = document.createElement("li");
+    li.setAttribute("data-block-card", "");
+    li.setAttribute("data-block-kind", "stage");
+    li.setAttribute("data-rule-type", ruleType);
+    li.setAttribute("data-category", category);
+    li.setAttribute("data-supported-types", supportedCSV);
+    li.setAttribute("data-compatible", "true");
+    li.setAttribute("draggable", "true");
+
+    const hiddenInput = document.createElement("input");
+    hiddenInput.type = "hidden";
+    hiddenInput.name = `col_${colIndex}_rules`;
+    hiddenInput.value = ruleType;
+
+    const topRow = document.createElement("div");
+    topRow.className = "l-cluster";
+
+    const titleGroup = document.createElement("div");
+    titleGroup.className = "l-cluster";
+
+    const dragHandle = document.createElement("span");
+    dragHandle.setAttribute("data-role", "drag-handle");
+    dragHandle.setAttribute("aria-hidden", "true");
+    dragHandle.setAttribute("title", "Drag block to reorder");
+    dragHandle.textContent = "\u22EE\u22EE";
+
+    const stepBadge = document.createElement("span");
+    stepBadge.className = "u-badge u-mono";
+    stepBadge.setAttribute("data-role", "step-badge");
+    stepBadge.textContent = "Block";
+
+    const strong = document.createElement("strong");
+    strong.textContent = label;
+
+    const catBadge = document.createElement("span");
+    catBadge.className = "u-badge u-mono";
+    catBadge.setAttribute("data-category-badge", category);
+    catBadge.textContent = category;
+
+    titleGroup.append(dragHandle, stepBadge, strong, catBadge);
+
+    const actionsGroup = document.createElement("div");
+    actionsGroup.className = "l-cluster";
+    actionsGroup.setAttribute("data-role", "block-actions");
+
+    const upBtn = document.createElement("button");
+    upBtn.type = "button";
+    upBtn.setAttribute("data-variant", "secondary");
+    upBtn.setAttribute("data-role", "move-block-up");
+    upBtn.setAttribute("aria-label", `Move ${label} up`);
+    upBtn.setAttribute("title", "Move block up");
+    upBtn.textContent = "\u2191";
+
+    const downBtn = document.createElement("button");
+    downBtn.type = "button";
+    downBtn.setAttribute("data-variant", "secondary");
+    downBtn.setAttribute("data-role", "move-block-down");
+    downBtn.setAttribute("aria-label", `Move ${label} down`);
+    downBtn.setAttribute("title", "Move block down");
+    downBtn.textContent = "\u2193";
+
+    const removeBtn = document.createElement("button");
+    removeBtn.type = "button";
+    removeBtn.setAttribute("data-variant", "secondary");
+    removeBtn.setAttribute("data-role", "remove-block");
+    removeBtn.setAttribute("aria-label", `Remove ${label}`);
+    removeBtn.setAttribute("title", "Remove block");
+    removeBtn.textContent = "\u00D7";
+
+    actionsGroup.append(upBtn, downBtn, removeBtn);
+    topRow.append(titleGroup, actionsGroup);
+
+    const descP = document.createElement("p");
+    descP.textContent = description;
+
+    const notice = document.createElement("small");
+    notice.setAttribute("data-role", "incompatible-notice");
+    notice.setAttribute("hidden", "");
+    notice.textContent = `Incompatible with selected Target Data Type — preserved in stack but excluded from execution until removed or type is restored (supports: ${supportedCSV}).`;
+
+    li.append(hiddenInput, topRow, descP, notice);
+    stack.appendChild(li);
+
+    picker.value = "";
+    this.syncPanel(panel);
   }
 
-  syncRowRules(row, selectedType) {
-    const chips = row.querySelectorAll("label[data-rule-chip]");
-    chips.forEach((chip) => {
-      const rawSupported = chip.getAttribute("data-supported-types") || "";
-      const supported = rawSupported.split(",").map((s) => s.trim());
-      const checkbox = chip.querySelector('input[type="checkbox"]');
-      const isCompatible = supported.includes(selectedType);
+  moveBlock(panel, block, direction) {
+    const stack = panel.querySelector('ol[data-role="block-stack"]');
+    if (!stack) return;
+    const stages = Array.from(stack.querySelectorAll('li[data-block-kind="stage"]'));
+    const currentIndex = stages.indexOf(block);
+    if (currentIndex === -1) return;
 
-      if (isCompatible) {
-        chip.removeAttribute("hidden");
-        if (checkbox) {
-          checkbox.disabled = false;
-          chip.setAttribute("data-active", checkbox.checked ? "true" : "false");
-        }
-      } else {
-        chip.setAttribute("hidden", "");
-        chip.setAttribute("data-active", "false");
-        if (checkbox) {
-          checkbox.checked = false;
-          checkbox.disabled = true;
-        }
-      }
-    });
+    const targetIndex = currentIndex + direction;
+    if (targetIndex < 0 || targetIndex >= stages.length) return;
+
+    const referenceBlock = stages[targetIndex];
+    if (direction < 0) {
+      stack.insertBefore(block, referenceBlock);
+    } else {
+      stack.insertBefore(block, referenceBlock.nextSibling);
+    }
+
+    this.syncPanel(panel);
   }
 }
 
