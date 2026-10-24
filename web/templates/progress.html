@@ -1,0 +1,19 @@
+{{ define "content" }}
+<section aria-labelledby="job-heading" id="job-progress-panel">
+  <h2 id="job-heading">Refinement Job <code class="u-mono">{{ .Job.ID }}</code></h2>
+  <refinery-progress job-id="{{ .Job.ID }}" dataset-id="{{ .Job.DatasetID }}" sse-url="/jobs/{{ .Job.ID }}/events" class="l-stack">
+    <dl class="l-cluster">
+      <div><dt>Status</dt><dd><output data-field="status" class="u-status" data-status="{{ .Job.Status }}">{{ .Job.Status }}</output></dd></div>
+      <div><dt>Processed Rows</dt><dd><output data-field="processed" class="u-mono">{{ .Job.ProcessedRows }} / {{ .Job.TotalRows }}</output></dd></div>
+      <div><dt>Valid Rows</dt><dd><output data-field="valid" class="u-mono">{{ .Job.ValidRows }}</output></dd></div>
+      <div><dt>Error Rows</dt><dd><output data-field="errors" class="u-mono">{{ .Job.ErrorRows }}</output></dd></div>
+    </dl>
+    <progress max="100" value="{{ .Percentage }}">{{ formatPct .Percentage }}</progress>
+    <p><output data-field="message">{{ if .Job.ErrorMessage }}{{ .Job.ErrorMessage }}{{ else }}Streaming and refining dataset...{{ end }}</output></p>
+  </refinery-progress>
+  <footer class="l-cluster">
+    <a href="/datasets/{{ .Job.DatasetID }}/records?job_id={{ .Job.ID }}" up-follow>View Cleaned Records &amp; Errors</a>
+    <a href="/datasets/{{ .Job.DatasetID }}/schema" up-follow>Back to Schema</a>
+  </footer>
+</section>
+{{ end }}

@@ -1,0 +1,55 @@
+{{ define "content" }}
+<section aria-labelledby="upload-heading">
+  <h2 id="upload-heading">Upload Raw Dataset</h2>
+  <form action="/datasets" method="post" enctype="multipart/form-data" up-submit up-target="main" class="l-stack">
+    <fieldset>
+      <legend>Source File (CSV, XLSX, JSON, JSONL, LOG)</legend>
+      <refinery-dropzone>
+        <label for="dataset-file">Select or drop a file to analyze its schema</label>
+        <input id="dataset-file" name="file" type="file" required accept=".csv,.tsv,.xlsx,.json,.jsonl,.ndjson,.log,.txt">
+      </refinery-dropzone>
+    </fieldset>
+    <div>
+      <button type="submit">Upload &amp; Infer Schema</button>
+    </div>
+  </form>
+</section>
+
+<section aria-labelledby="datasets-heading">
+  <h2 id="datasets-heading">Uploaded Datasets</h2>
+  {{ if .Datasets }}
+  <div class="l-table-scroll">
+    <table>
+      <caption>Recent ingested files and refinement status</caption>
+      <thead>
+        <tr>
+          <th scope="col">ID</th>
+          <th scope="col">File Name</th>
+          <th scope="col">Format</th>
+          <th scope="col" class="u-text-right">Size (Bytes)</th>
+          <th scope="col">Status</th>
+          <th scope="col">Actions</th>
+        </tr>
+      </thead>
+      <tbody>
+        {{ range .Datasets }}
+        <tr>
+          <td class="u-mono">{{ .ID }}</td>
+          <td>{{ .OriginalName }}</td>
+          <td class="u-mono">{{ .Format }}</td>
+          <td class="u-mono u-text-right">{{ .SizeBytes }}</td>
+          <td><span class="u-status" data-status="{{ .Status }}">{{ .Status }}</span></td>
+          <td class="l-cluster">
+            <a href="/datasets/{{ .ID }}/schema" up-follow>Schema &amp; Rules</a>
+            <a href="/datasets/{{ .ID }}/records" up-follow>Records</a>
+          </td>
+        </tr>
+        {{ end }}
+      </tbody>
+    </table>
+  </div>
+  {{ else }}
+  <p>No datasets uploaded yet. Upload a file above to begin.</p>
+  {{ end }}
+</section>
+{{ end }}

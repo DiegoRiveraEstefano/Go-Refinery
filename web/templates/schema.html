@@ -1,0 +1,75 @@
+{{ define "content" }}
+<article class="l-stack">
+  <header class="l-cluster">
+    <div>
+      <h2>Schema &amp; Cleaning Pipeline: <code>{{ .Dataset.OriginalName }}</code></h2>
+      <dl class="l-cluster">
+        <div><dt>Dataset ID</dt><dd class="u-mono">{{ .Dataset.ID }}</dd></div>
+        <div><dt>Format</dt><dd class="u-mono">{{ .Dataset.Format }}</dd></div>
+        <div><dt>Status</dt><dd><span class="u-status" data-status="{{ .Dataset.Status }}">{{ .Dataset.Status }}</span></dd></div>
+      </dl>
+    </div>
+  </header>
+
+  <refinery-schema-editor>
+    <form action="/datasets/{{ .Dataset.ID }}/schema" method="post" up-submit up-target="main" class="l-stack">
+      <fieldset>
+        <legend>Inferred Columns &amp; Transformation Rules</legend>
+        <div class="l-table-scroll">
+          <table>
+            <thead>
+              <tr>
+                <th scope="col">#</th>
+                <th scope="col">Original Name</th>
+                <th scope="col">Normalized Key</th>
+                <th scope="col">Inferred Type</th>
+                <th scope="col">Target Type</th>
+                <th scope="col">Nullable</th>
+                <th scope="col">Cleaning Stages</th>
+                <th scope="col">Sample Values</th>
+              </tr>
+            </thead>
+            <tbody>
+              {{ range $col := .Columns }}
+              <tr>
+                <td class="u-mono">{{ $col.Index }}</td>
+                <td>{{ $col.OriginalName }}</td>
+                <td>
+                  <input type="text" name="col_{{ $col.Index }}_name" value="{{ $col.NormalizedName }}" class="u-mono" required>
+                </td>
+                <td class="u-mono">{{ $col.InferredType }}</td>
+                <td>
+                  <select name="col_{{ $col.Index }}_type">
+                    {{ range $t := $.AllTypes }}
+                    <option value="{{ $t }}" {{ if eq $t $col.TargetType }}selected{{ end }}>{{ $t }}</option>
+                    {{ end }}
+                  </select>
+                </td>
+                <td>
+                  <input type="checkbox" name="col_{{ $col.Index }}_nullable" value="1" {{ if $col.Nullable }}checked{{ end }}>
+                </td>
+                <td>
+                  <label><input type="checkbox" name="col_{{ $col.Index }}_rules" value="trim_space" {{ if $col.HasTrim }}checked{{ end }}> Trim</label>
+                  <label><input type="checkbox" name="col_{{ $col.Index }}_rules" value="to_lower" {{ if $col.HasLower }}checked{{ end }}> Lower</label>
+                  <label><input type="checkbox" name="col_{{ $col.Index }}_rules" value="to_upper" {{ if $col.HasUpper }}checked{{ end }}> Upper</label>
+                </td>
+                <td class="u-mono">
+                  {{ range $col.SampleValues }}<code>{{ . }}</code> {{ end }}
+                </td>
+              </tr>
+              {{ end }}
+            </tbody>
+          </table>
+        </div>
+      </fieldset>
+      <div class="l-cluster">
+        <button type="submit">Save Schema &amp; Rules</button>
+      </div>
+    </form>
+  </refinery-schema-editor>
+
+  <form action="/datasets/{{ .Dataset.ID }}/jobs" method="post" up-submit up-target="main">
+    <button type="submit">Start Asynchronous Refinement Job</button>
+  </form>
+</article>
+{{ end }}

@@ -1,0 +1,66 @@
+{{ define "content" }}
+<section aria-labelledby="records-heading" class="l-stack">
+  <header class="l-cluster">
+    <h2 id="records-heading">Refined Records: <code>{{ .Dataset.OriginalName }}</code></h2>
+    <a href="/datasets/{{ .Dataset.ID }}/schema" up-follow>Configure Schema</a>
+  </header>
+
+  {{ if .Records }}
+  <div class="l-table-scroll">
+    <table>
+      <caption>Validated and normalized output rows</caption>
+      <thead>
+        <tr>
+          <th scope="col" class="u-text-right">Row #</th>
+          {{ range .Columns }}
+          <th scope="col" class="u-mono">{{ .NormalizedName }}</th>
+          {{ end }}
+        </tr>
+      </thead>
+      <tbody>
+        {{ range $rec := .Records }}
+        <tr>
+          <td class="u-mono u-text-right">{{ $rec.RowNumber }}</td>
+          {{ range $col := $.Columns }}
+          <td class="u-mono">{{ index $rec.Values $col.NormalizedName }}</td>
+          {{ end }}
+        </tr>
+        {{ end }}
+      </tbody>
+    </table>
+  </div>
+  {{ else }}
+  <p>No refined records available yet. Run a refinement job first.</p>
+  {{ end }}
+
+  {{ if .Errors }}
+  <details open>
+    <summary>Row Validation Errors ({{ len .Errors }})</summary>
+    <div class="l-table-scroll">
+      <table>
+        <thead>
+          <tr>
+            <th scope="col">Row #</th>
+            <th scope="col">Column</th>
+            <th scope="col">Raw Value</th>
+            <th scope="col">Code</th>
+            <th scope="col">Message</th>
+          </tr>
+        </thead>
+        <tbody>
+          {{ range .Errors }}
+          <tr>
+            <td class="u-mono">{{ .RowNumber }}</td>
+            <td class="u-mono">{{ .ColumnName }}</td>
+            <td class="u-mono">{{ .RawValue }}</td>
+            <td class="u-mono">{{ .ErrorCode }}</td>
+            <td>{{ .Message }}</td>
+          </tr>
+          {{ end }}
+        </tbody>
+      </table>
+    </div>
+  </details>
+  {{ end }}
+</section>
+{{ end }}

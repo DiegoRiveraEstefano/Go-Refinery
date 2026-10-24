@@ -1,0 +1,27 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>Go-Refinery</title>
+  <link rel="stylesheet" href="/static/css/tokens.css">
+  <link rel="stylesheet" href="/static/css/elements.css">
+  <script type="module" src="/static/js/app.js" defer></script>
+</head>
+<body>
+  <header class="l-container l-cluster">
+    <h1><a href="/" up-follow>Go-Refinery</a></h1>
+    <nav up-nav aria-label="Primary">
+      <a href="/" up-follow>Datasets</a>
+    </nav>
+  </header>
+
+  <main up-main class="l-container l-stack">
+    {{ block "content" . }}{{ end }}
+  </main>
+
+  <footer class="l-container">
+    <small>Go-Refinery &mdash; Hexagonal Data Ingestion &amp; Cleaning Engine</small>
+  </footer>
+</body>
+</html>
