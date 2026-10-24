@@ -16,15 +16,21 @@ import (
 
 const exportBatchPageSize = 500
 
-// ExportRecords streams all refined records for datasetID into w in the requested format
-// (CSV, TSV, JSON, or JSONL) using bounded pagination batches.
+// ExportRecords streams refined records for datasetID (filtered by query if non-empty)
+// into w in the requested format (CSV, TSV, JSON, or JSONL) using bounded pagination batches.
 func (s *RefineryService) ExportRecords(
 	ctx context.Context,
 	datasetID dataset.ID,
 	format ports.ExportFormat,
+	query dataset.SearchQuery,
 	w io.Writer,
 ) error {
 	ds, err := s.datasets.GetByID(ctx, datasetID)
+	if err != nil {
+		return err
+	}
+
+	compiled, err := dataset.CompileSearchQuery(query)
 	if err != nil {
 		return err
 	}
@@ -39,18 +45,19 @@ func (s *RefineryService) ExportRecords(
 		logger.F("dataset_id", datasetID),
 		logger.F("format", format),
 		logger.F("columns", len(headers)),
+		logger.F("filtered", !query.IsEmpty()),
 	)
 
 	var exportedCount int64
 	switch format {
 	case ports.ExportCSV:
-		exportedCount, err = s.exportDelimited(ctx, datasetID, headers, ',', w)
+		exportedCount, err = s.exportDelimited(ctx, datasetID, headers, ',', compiled, w)
 	case ports.ExportTSV:
-		exportedCount, err = s.exportDelimited(ctx, datasetID, headers, '\t', w)
+		exportedCount, err = s.exportDelimited(ctx, datasetID, headers, '\t', compiled, w)
 	case ports.ExportJSONL:
-		exportedCount, err = s.exportJSONL(ctx, datasetID, w)
+		exportedCount, err = s.exportJSONL(ctx, datasetID, compiled, w)
 	case ports.ExportJSON:
-		exportedCount, err = s.exportJSONArray(ctx, datasetID, w)
+		exportedCount, err = s.exportJSONArray(ctx, datasetID, compiled, w)
 	default:
 		return fmt.Errorf("%w: export format %q", dataset.ErrUnsupportedFormat, format)
 	}
@@ -77,6 +84,7 @@ func (s *RefineryService) exportDelimited(
 	datasetID dataset.ID,
 	headers []string,
 	comma rune,
+	compiled *dataset.CompiledQuery,
 	w io.Writer,
 ) (int64, error) {
 	cw := csv.NewWriter(w)
@@ -105,6 +113,9 @@ func (s *RefineryService) exportDelimited(
 		}
 
 		for _, rec := range batch {
+			if !compiled.Match(rec) {
+				continue
+			}
 			for i, key := range headers {
 				rowBuf[i] = sanitizeSpreadsheetCell(formatExportCell(rec.Values[key]))
 			}
@@ -128,7 +139,12 @@ func (s *RefineryService) exportDelimited(
 	return total, cw.Error()
 }
 
-func (s *RefineryService) exportJSONL(ctx context.Context, datasetID dataset.ID, w io.Writer) (int64, error) {
+func (s *RefineryService) exportJSONL(
+	ctx context.Context,
+	datasetID dataset.ID,
+	compiled *dataset.CompiledQuery,
+	w io.Writer,
+) (int64, error) {
 	var (
 		offset int
 		total  int64
@@ -149,6 +165,9 @@ func (s *RefineryService) exportJSONL(ctx context.Context, datasetID dataset.ID,
 		}
 
 		for _, rec := range batch {
+			if !compiled.Match(rec) {
+				continue
+			}
 			if err := enc.Encode(rec.Values); err != nil {
 				return total, fmt.Errorf("encoding jsonl row %d: %w", rec.RowNumber, err)
 			}
@@ -164,7 +183,12 @@ func (s *RefineryService) exportJSONL(ctx context.Context, datasetID dataset.ID,
 	return total, nil
 }
 
-func (s *RefineryService) exportJSONArray(ctx context.Context, datasetID dataset.ID, w io.Writer) (int64, error) {
+func (s *RefineryService) exportJSONArray(
+	ctx context.Context,
+	datasetID dataset.ID,
+	compiled *dataset.CompiledQuery,
+	w io.Writer,
+) (int64, error) {
 	if _, err := io.WriteString(w, "[\n"); err != nil {
 		return 0, err
 	}
@@ -187,6 +211,9 @@ func (s *RefineryService) exportJSONArray(ctx context.Context, datasetID dataset
 		}
 
 		for _, rec := range batch {
+			if !compiled.Match(rec) {
+				continue
+			}
 			if total > 0 {
 				if _, err := io.WriteString(w, ",\n"); err != nil {
 					return total, err

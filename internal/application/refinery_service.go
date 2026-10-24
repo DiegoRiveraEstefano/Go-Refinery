@@ -181,6 +181,84 @@ func (s *RefineryService) ListRecords(ctx context.Context, datasetID dataset.ID,
 	return s.records.ListRecords(ctx, datasetID, filter)
 }
 
+// SearchRecords scans refined records for datasetID in 500-row batches and filters them
+// using the compiled SearchQuery (supporting text, regex, operators, and Mongo-style JSON/DSL).
+func (s *RefineryService) SearchRecords(
+	ctx context.Context,
+	datasetID dataset.ID,
+	query dataset.SearchQuery,
+	filter ports.PageFilter,
+) ([]dataset.Record, int, error) {
+	if filter.Limit <= 0 || filter.Limit > 500 {
+		filter.Limit = 100
+	}
+	if filter.Offset < 0 {
+		filter.Offset = 0
+	}
+
+	if query.IsEmpty() {
+		recs, err := s.ListRecords(ctx, datasetID, filter)
+		return recs, len(recs), err
+	}
+
+	compiled, err := dataset.CompileSearchQuery(query)
+	if err != nil {
+		s.log.WarnContext(ctx, "invalid dataset search query",
+			logger.F("dataset_id", datasetID),
+			logger.F("query", query.Query),
+			logger.Err(err),
+		)
+		return nil, 0, err
+	}
+
+	start := time.Now()
+	var (
+		scanOffset   int
+		totalMatched int
+		pageResults  = make([]dataset.Record, 0, filter.Limit)
+	)
+
+	for {
+		batch, err := s.records.ListRecords(ctx, datasetID, ports.PageFilter{
+			Limit:  exportBatchPageSize,
+			Offset: scanOffset,
+		})
+		if err != nil {
+			return nil, 0, err
+		}
+		if len(batch) == 0 {
+			break
+		}
+
+		for _, rec := range batch {
+			if compiled.Match(rec) {
+				if totalMatched >= filter.Offset && len(pageResults) < filter.Limit {
+					pageResults = append(pageResults, rec)
+				}
+				totalMatched++
+			}
+		}
+
+		if len(batch) < exportBatchPageSize {
+			break
+		}
+		scanOffset += len(batch)
+	}
+
+	s.log.InfoContext(ctx, "executed dataset search query",
+		logger.F("dataset_id", datasetID),
+		logger.F("query", query.Query),
+		logger.F("field", query.Field),
+		logger.F("op", query.Operator),
+		logger.F("value", query.Value),
+		logger.F("matched_rows", totalMatched),
+		logger.F("returned_rows", len(pageResults)),
+		logger.F("duration_ms", time.Since(start).Milliseconds()),
+	)
+
+	return pageResults, totalMatched, nil
+}
+
 // JobQueue exposes the read-only channel consumed by background workers.
 func (s *RefineryService) JobQueue() <-chan job.ID {
 	return s.jobQueue
