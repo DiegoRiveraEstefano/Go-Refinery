@@ -153,13 +153,21 @@ func (m *httpTestRepo) WriteBatch(_ context.Context, jobID job.ID, records []dat
 	return nil
 }
 
-func (m *httpTestRepo) ListRecords(_ context.Context, datasetID dataset.ID, _ ports.PageFilter) ([]dataset.Record, error) {
+func (m *httpTestRepo) ListRecords(_ context.Context, datasetID dataset.ID, page ports.PageFilter) ([]dataset.Record, error) {
 	m.mu.RLock()
 	defer m.mu.RUnlock()
-	return append([]dataset.Record(nil), m.records[datasetID]...), nil
+	all := m.records[datasetID]
+	if page.Offset >= len(all) {
+		return nil, nil
+	}
+	end := len(all)
+	if page.Limit > 0 && page.Offset+page.Limit < end {
+		end = page.Offset + page.Limit
+	}
+	return append([]dataset.Record(nil), all[page.Offset:end]...), nil
 }
 
-func TestHTTPAdapter_UploadSchemaJobAndSSE(t *testing.T) {
+func TestHTTPAdapter_UploadSchemaJobSSEAndExport(t *testing.T) {
 	ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
 	defer cancel()
 
@@ -211,6 +219,9 @@ func TestHTTPAdapter_UploadSchemaJobAndSSE(t *testing.T) {
 	}
 	if csp := resp.Header.Get("Content-Security-Policy"); csp == "" {
 		t.Error("expected Content-Security-Policy header on response")
+	}
+	if reqID := resp.Header.Get("X-Request-ID"); reqID == "" {
+		t.Error("expected X-Request-ID header on response")
 	}
 
 	schemaPath := resp.Header.Get("Location")
@@ -303,7 +314,7 @@ func TestHTTPAdapter_UploadSchemaJobAndSSE(t *testing.T) {
 		t.Fatal("did not receive expected SSE progress event")
 	}
 
-	// 6. GET /datasets/{id}/records to inspect cleaned table
+	// 6. GET /datasets/{id}/records to inspect cleaned table and export buttons
 	recResp, err := http.Get(ts.URL + "/datasets/" + dsID + "/records")
 	if err != nil {
 		t.Fatalf("GET /datasets/%s/records failed: %v", dsID, err)
@@ -312,5 +323,42 @@ func TestHTTPAdapter_UploadSchemaJobAndSSE(t *testing.T) {
 	_ = recResp.Body.Close()
 	if !strings.Contains(string(recHTML), "alice") {
 		t.Fatalf("expected cleaned record 'alice' in records HTML table, got: %s", string(recHTML))
+	}
+	if !strings.Contains(string(recHTML), "/export?format=csv") {
+		t.Fatalf("expected export toolbar links in records view")
+	}
+
+	// 7. Verify multi-format export endpoints (CSV, TSV, JSON, JSONL)
+	exportCases := []struct {
+		format      string
+		contentType string
+		mustContain string
+	}{
+		{format: "csv", contentType: "text/csv", mustContain: "1,alice"},
+		{format: "tsv", contentType: "text/tab-separated-values", mustContain: "1\talice"},
+		{format: "json", contentType: "application/json", mustContain: `"name": "alice"`},
+		{format: "jsonl", contentType: "application/x-ndjson", mustContain: `"name":"alice"`},
+	}
+
+	for _, tc := range exportCases {
+		expResp, err := http.Get(ts.URL + "/datasets/" + dsID + "/export?format=" + tc.format)
+		if err != nil {
+			t.Fatalf("GET export format=%s failed: %v", tc.format, err)
+		}
+		expBytes, _ := io.ReadAll(expResp.Body)
+		_ = expResp.Body.Close()
+
+		if expResp.StatusCode != http.StatusOK {
+			t.Fatalf("expected 200 OK for format=%s, got %d: %s", tc.format, expResp.StatusCode, string(expBytes))
+		}
+		if ct := expResp.Header.Get("Content-Type"); !strings.HasPrefix(ct, tc.contentType) {
+			t.Errorf("format=%s: expected Content-Type prefix %q, got %q", tc.format, tc.contentType, ct)
+		}
+		if cd := expResp.Header.Get("Content-Disposition"); !strings.Contains(cd, "attachment; filename=") {
+			t.Errorf("format=%s: expected Content-Disposition attachment header, got %q", tc.format, cd)
+		}
+		if !strings.Contains(string(expBytes), tc.mustContain) {
+			t.Errorf("format=%s: expected payload to contain %q, got:\n%s", tc.format, tc.mustContain, string(expBytes))
+		}
 	}
 }

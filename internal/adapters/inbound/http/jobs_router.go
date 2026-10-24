@@ -9,6 +9,7 @@ import (
 
 	"github.com/diego/go-refinery/internal/domain/dataset"
 	"github.com/diego/go-refinery/internal/domain/job"
+	"github.com/diego/go-refinery/internal/logger"
 )
 
 func (s *Server) registerJobRoutes(mux *http.ServeMux) {
@@ -22,10 +23,18 @@ func (s *Server) handleStartJob(w http.ResponseWriter, r *http.Request, dsID dat
 		return
 	}
 	if errors.Is(err, job.ErrJobAlreadyActive) {
+		s.log.WarnContext(r.Context(), "refinement job conflict",
+			logger.F("dataset_id", string(dsID)),
+			logger.Err(err),
+		)
 		http.Error(w, err.Error(), http.StatusConflict)
 		return
 	}
 	if err != nil {
+		s.log.ErrorContext(r.Context(), "starting refinement job failed",
+			logger.F("dataset_id", string(dsID)),
+			logger.Err(err),
+		)
 		http.Error(w, fmt.Sprintf("starting job: %v", err), http.StatusInternalServerError)
 		return
 	}
@@ -52,6 +61,10 @@ func (s *Server) handleJobsSubroutes(w http.ResponseWriter, r *http.Request) {
 			return
 		}
 		if err != nil {
+			s.log.ErrorContext(r.Context(), "loading job failed",
+				logger.F("job_id", string(jobID)),
+				logger.Err(err),
+			)
 			http.Error(w, err.Error(), http.StatusInternalServerError)
 			return
 		}
@@ -84,6 +97,10 @@ func (s *Server) handleJobSSE(w http.ResponseWriter, r *http.Request, jobID job.
 	w.Header().Set("Connection", "keep-alive")
 	w.Header().Set("X-Accel-Buffering", "no")
 
+	s.log.DebugContext(r.Context(), "sse client subscribed",
+		logger.F("job_id", string(jobID)),
+	)
+
 	// Send initial snapshot if job exists.
 	if s.refinery != nil {
 		if j, err := s.refinery.GetJob(r.Context(), jobID); err == nil && j != nil {
@@ -109,7 +126,12 @@ func (s *Server) handleJobSSE(w http.ResponseWriter, r *http.Request, jobID job.
 	}
 
 	eventsCh, unsubscribe := s.broker.Subscribe(r.Context(), jobID)
-	defer unsubscribe()
+	defer func() {
+		unsubscribe()
+		s.log.DebugContext(r.Context(), "sse client disconnected",
+			logger.F("job_id", string(jobID)),
+		)
+	}()
 
 	for {
 		select {

@@ -5,12 +5,14 @@ import (
 	"fmt"
 	"io"
 	"net/http"
+	"path/filepath"
 	"strconv"
 	"strings"
 
 	"github.com/diego/go-refinery/internal/adapters/outbound/parsers"
 	"github.com/diego/go-refinery/internal/domain/dataset"
 	"github.com/diego/go-refinery/internal/domain/job"
+	"github.com/diego/go-refinery/internal/logger"
 	"github.com/diego/go-refinery/internal/ports"
 )
 
@@ -63,6 +65,12 @@ func (s *Server) handleDatasetsSubroutes(w http.ResponseWriter, r *http.Request)
 			return
 		}
 		s.handleListRecords(w, r, dsID)
+	case "export":
+		if r.Method != http.MethodGet {
+			http.Error(w, "method not allowed", http.StatusMethodNotAllowed)
+			return
+		}
+		s.handleExportDataset(w, r, dsID)
 	default:
 		http.NotFound(w, r)
 	}
@@ -75,6 +83,7 @@ func (s *Server) handleUploadDataset(w http.ResponseWriter, r *http.Request) {
 
 	mr, err := r.MultipartReader()
 	if err != nil {
+		s.log.WarnContext(r.Context(), "invalid multipart upload request", logger.Err(err))
 		http.Error(w, "expected multipart/form-data upload", http.StatusBadRequest)
 		return
 	}
@@ -85,6 +94,7 @@ func (s *Server) handleUploadDataset(w http.ResponseWriter, r *http.Request) {
 			break
 		}
 		if err != nil {
+			s.log.WarnContext(r.Context(), "error reading multipart stream", logger.Err(err))
 			http.Error(w, fmt.Sprintf("reading multipart stream: %v", err), http.StatusBadRequest)
 			return
 		}
@@ -98,6 +108,10 @@ func (s *Server) handleUploadDataset(w http.ResponseWriter, r *http.Request) {
 		format, err := parsers.DetectFormat(filename)
 		if err != nil {
 			_ = part.Close()
+			s.log.WarnContext(r.Context(), "rejected unsupported upload file format",
+				logger.F("filename", filename),
+				logger.Err(err),
+			)
 			http.Error(w, err.Error(), http.StatusUnsupportedMediaType)
 			return
 		}
@@ -109,6 +123,10 @@ func (s *Server) handleUploadDataset(w http.ResponseWriter, r *http.Request) {
 		})
 		_ = part.Close()
 		if err != nil {
+			s.log.ErrorContext(r.Context(), "dataset upload and inference failed",
+				logger.F("filename", filename),
+				logger.Err(err),
+			)
 			http.Error(w, fmt.Sprintf("ingesting dataset: %v", err), http.StatusUnprocessableEntity)
 			return
 		}
@@ -129,6 +147,10 @@ func (s *Server) handleListRecords(w http.ResponseWriter, r *http.Request, dsID 
 		return
 	}
 	if err != nil {
+		s.log.ErrorContext(r.Context(), "failed to load dataset for records view",
+			logger.F("dataset_id", dsID),
+			logger.Err(err),
+		)
 		http.Error(w, fmt.Sprintf("loading dataset: %v", err), http.StatusInternalServerError)
 		return
 	}
@@ -141,6 +163,10 @@ func (s *Server) handleListRecords(w http.ResponseWriter, r *http.Request, dsID 
 		Offset: offset,
 	})
 	if err != nil {
+		s.log.ErrorContext(r.Context(), "failed to list dataset records",
+			logger.F("dataset_id", dsID),
+			logger.Err(err),
+		)
 		http.Error(w, fmt.Sprintf("loading records: %v", err), http.StatusInternalServerError)
 		return
 	}
@@ -156,4 +182,72 @@ func (s *Server) handleListRecords(w http.ResponseWriter, r *http.Request, dsID 
 		"Records": records,
 		"Errors":  jobErrors,
 	})
+}
+
+// handleExportDataset streams all refined records for a dataset as a downloadable file
+// in CSV, TSV, JSON, or JSONL format.
+func (s *Server) handleExportDataset(w http.ResponseWriter, r *http.Request, dsID dataset.ID) {
+	ds, err := s.ingest.GetDataset(r.Context(), dsID)
+	if errors.Is(err, dataset.ErrDatasetNotFound) {
+		http.NotFound(w, r)
+		return
+	}
+	if err != nil {
+		s.log.ErrorContext(r.Context(), "failed to load dataset for export",
+			logger.F("dataset_id", dsID),
+			logger.Err(err),
+		)
+		http.Error(w, err.Error(), http.StatusInternalServerError)
+		return
+	}
+
+	rawFormat := strings.ToLower(strings.TrimSpace(r.URL.Query().Get("format")))
+	if rawFormat == "" {
+		rawFormat = string(ports.ExportCSV)
+	}
+
+	var (
+		exportFmt   ports.ExportFormat
+		contentType string
+		ext         string
+	)
+
+	switch ports.ExportFormat(rawFormat) {
+	case ports.ExportCSV:
+		exportFmt = ports.ExportCSV
+		contentType = "text/csv; charset=utf-8"
+		ext = ".csv"
+	case ports.ExportTSV:
+		exportFmt = ports.ExportTSV
+		contentType = "text/tab-separated-values; charset=utf-8"
+		ext = ".tsv"
+	case ports.ExportJSON:
+		exportFmt = ports.ExportJSON
+		contentType = "application/json; charset=utf-8"
+		ext = ".json"
+	case ports.ExportJSONL:
+		exportFmt = ports.ExportJSONL
+		contentType = "application/x-ndjson; charset=utf-8"
+		ext = ".jsonl"
+	default:
+		http.Error(w, fmt.Sprintf("unsupported export format %q", rawFormat), http.StatusBadRequest)
+		return
+	}
+
+	baseName := strings.TrimSuffix(filepath.Base(ds.OriginalName), filepath.Ext(ds.OriginalName))
+	if baseName == "" {
+		baseName = string(ds.ID)
+	}
+	downloadName := fmt.Sprintf("%s_refined%s", baseName, ext)
+
+	w.Header().Set("Content-Type", contentType)
+	w.Header().Set("Content-Disposition", fmt.Sprintf("attachment; filename=%q", downloadName))
+
+	if err := s.refinery.ExportRecords(r.Context(), dsID, exportFmt, w); err != nil {
+		s.log.ErrorContext(r.Context(), "streaming export failed",
+			logger.F("dataset_id", dsID),
+			logger.F("format", exportFmt),
+			logger.Err(err),
+		)
+	}
 }

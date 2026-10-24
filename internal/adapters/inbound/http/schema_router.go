@@ -7,13 +7,23 @@ import (
 	"strings"
 
 	"github.com/diego/go-refinery/internal/domain/dataset"
+	"github.com/diego/go-refinery/internal/domain/pipeline"
+	"github.com/diego/go-refinery/internal/logger"
 )
+
+type ruleView struct {
+	Type           string
+	Label          string
+	Description    string
+	Category       string
+	SupportedCSV   string
+	Checked        bool
+	VisibleInitial bool
+}
 
 type columnView struct {
 	dataset.ColumnSchema
-	HasTrim  bool
-	HasLower bool
-	HasUpper bool
+	AvailableRules []ruleView
 }
 
 func (s *Server) handleGetSchema(w http.ResponseWriter, r *http.Request, dsID dataset.ID) {
@@ -23,24 +33,48 @@ func (s *Server) handleGetSchema(w http.ResponseWriter, r *http.Request, dsID da
 		return
 	}
 	if err != nil {
+		s.log.ErrorContext(r.Context(), "loading dataset for schema view failed",
+			logger.F("dataset_id", string(dsID)),
+			logger.Err(err),
+		)
 		http.Error(w, fmt.Sprintf("loading dataset: %v", err), http.StatusInternalServerError)
 		return
 	}
 
+	catalog := pipeline.AvailableRules()
 	cols := make([]columnView, len(ds.Schema.Columns))
+
 	for i, c := range ds.Schema.Columns {
-		cv := columnView{ColumnSchema: c}
+		activeRules := make(map[string]bool, len(c.RuleSpecs))
 		for _, rs := range c.RuleSpecs {
-			switch rs.Type {
-			case "trim_space":
-				cv.HasTrim = true
-			case "to_lower":
-				cv.HasLower = true
-			case "to_upper":
-				cv.HasUpper = true
+			activeRules[rs.Type] = true
+		}
+
+		rvList := make([]ruleView, len(catalog))
+		for j, desc := range catalog {
+			supportedStrs := make([]string, len(desc.SupportedTypes))
+			visible := false
+			for k, st := range desc.SupportedTypes {
+				supportedStrs[k] = string(st)
+				if st == c.TargetType {
+					visible = true
+				}
+			}
+			rvList[j] = ruleView{
+				Type:           desc.Type,
+				Label:          desc.Label,
+				Description:    desc.Description,
+				Category:       string(desc.Category),
+				SupportedCSV:   strings.Join(supportedStrs, ","),
+				Checked:        activeRules[desc.Type],
+				VisibleInitial: visible,
 			}
 		}
-		cols[i] = cv
+
+		cols[i] = columnView{
+			ColumnSchema:   c,
+			AvailableRules: rvList,
+		}
 	}
 
 	renderPage(w, schemaTmpl, http.StatusOK, map[string]any{
@@ -66,11 +100,19 @@ func (s *Server) handlePostSchema(w http.ResponseWriter, r *http.Request, dsID d
 		return
 	}
 	if err != nil {
+		s.log.ErrorContext(r.Context(), "loading dataset for schema update failed",
+			logger.F("dataset_id", string(dsID)),
+			logger.Err(err),
+		)
 		http.Error(w, fmt.Sprintf("loading dataset: %v", err), http.StatusInternalServerError)
 		return
 	}
 
 	if err := r.ParseForm(); err != nil {
+		s.log.WarnContext(r.Context(), "invalid schema form payload",
+			logger.F("dataset_id", string(dsID)),
+			logger.Err(err),
+		)
 		http.Error(w, "invalid form payload", http.StatusBadRequest)
 		return
 	}
@@ -103,6 +145,10 @@ func (s *Server) handlePostSchema(w http.ResponseWriter, r *http.Request, dsID d
 	}
 
 	if err := s.schema.UpdateSchema(r.Context(), dsID, dataset.Schema{Columns: updatedCols}); err != nil {
+		s.log.WarnContext(r.Context(), "schema validation failed",
+			logger.F("dataset_id", string(dsID)),
+			logger.Err(err),
+		)
 		http.Error(w, fmt.Sprintf("updating schema: %v", err), http.StatusUnprocessableEntity)
 		return
 	}
