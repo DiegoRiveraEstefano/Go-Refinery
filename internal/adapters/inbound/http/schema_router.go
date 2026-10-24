@@ -4,6 +4,7 @@ import (
 	"errors"
 	"fmt"
 	"net/http"
+	"strconv"
 	"strings"
 
 	"github.com/diego/go-refinery/internal/domain/dataset"
@@ -23,6 +24,7 @@ type ruleView struct {
 
 type columnView struct {
 	dataset.ColumnSchema
+	AppliedBlocks  []ruleView
 	AvailableRules []ruleView
 }
 
@@ -42,12 +44,40 @@ func (s *Server) handleGetSchema(w http.ResponseWriter, r *http.Request, dsID da
 	}
 
 	catalog := pipeline.AvailableRules()
+	catalogByType := make(map[string]pipeline.RuleDescriptor, len(catalog))
+	for _, desc := range catalog {
+		catalogByType[desc.Type] = desc
+	}
+
 	cols := make([]columnView, len(ds.Schema.Columns))
 
 	for i, c := range ds.Schema.Columns {
 		activeRules := make(map[string]bool, len(c.RuleSpecs))
+		appliedList := make([]ruleView, 0, len(c.RuleSpecs))
+
 		for _, rs := range c.RuleSpecs {
 			activeRules[rs.Type] = true
+			desc, ok := catalogByType[rs.Type]
+			if !ok {
+				continue
+			}
+			supportedStrs := make([]string, len(desc.SupportedTypes))
+			compatible := false
+			for k, st := range desc.SupportedTypes {
+				supportedStrs[k] = string(st)
+				if st == c.TargetType {
+					compatible = true
+				}
+			}
+			appliedList = append(appliedList, ruleView{
+				Type:           desc.Type,
+				Label:          desc.Label,
+				Description:    desc.Description,
+				Category:       string(desc.Category),
+				SupportedCSV:   strings.Join(supportedStrs, ","),
+				Checked:        true,
+				VisibleInitial: compatible,
+			})
 		}
 
 		rvList := make([]ruleView, len(catalog))
@@ -73,13 +103,30 @@ func (s *Server) handleGetSchema(w http.ResponseWriter, r *http.Request, dsID da
 
 		cols[i] = columnView{
 			ColumnSchema:   c,
+			AppliedBlocks:  appliedList,
 			AvailableRules: rvList,
 		}
 	}
 
+	activeCol := 0
+	if len(cols) > 0 {
+		activeCol = cols[0].Index
+	}
+	if rawActive := strings.TrimSpace(r.FormValue("active_col")); rawActive != "" {
+		if parsed, err := strconv.Atoi(rawActive); err == nil {
+			for _, col := range cols {
+				if col.Index == parsed {
+					activeCol = parsed
+					break
+				}
+			}
+		}
+	}
+
 	renderPage(w, schemaTmpl, http.StatusOK, map[string]any{
-		"Dataset": ds,
-		"Columns": cols,
+		"Dataset":   ds,
+		"Columns":   cols,
+		"ActiveCol": activeCol,
 		"AllTypes": []dataset.DataType{
 			dataset.TypeString,
 			dataset.TypeInteger,

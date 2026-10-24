@@ -237,12 +237,17 @@ func TestHTTPAdapter_UploadSchemaJobSSEAndExport(t *testing.T) {
 	}
 	htmlBytes, _ := io.ReadAll(schemaResp.Body)
 	_ = schemaResp.Body.Close()
-	if !strings.Contains(string(htmlBytes), "<refinery-schema-editor>") {
+	schemaHTML := string(htmlBytes)
+	if !strings.Contains(schemaHTML, "<refinery-schema-editor>") {
 		t.Fatalf("expected <refinery-schema-editor> in HTML response")
 	}
+	if !strings.Contains(schemaHTML, `data-role="block-stack"`) || !strings.Contains(schemaHTML, `data-block-kind="base"`) {
+		t.Fatalf("expected block stack and base data type block in schema HTML")
+	}
 
-	// 3. POST /datasets/{id}/schema to configure trim_space and to_lower on column 1
+	// 3. POST /datasets/{id}/schema to configure stacked blocks (trim_space then to_lower) on column 1
 	form := url.Values{
+		"active_col":     {"1"},
 		"col_0_name":     {"id"},
 		"col_0_type":     {"INTEGER"},
 		"col_1_name":     {"name"},
@@ -254,9 +259,16 @@ func TestHTTPAdapter_UploadSchemaJobSSEAndExport(t *testing.T) {
 	if err != nil {
 		t.Fatalf("POST %s failed: %v", schemaPath, err)
 	}
+	postSchemaBytes, _ := io.ReadAll(postSchemaResp.Body)
 	_ = postSchemaResp.Body.Close()
 	if postSchemaResp.StatusCode != http.StatusOK {
 		t.Fatalf("expected 200 OK from schema update, got %d", postSchemaResp.StatusCode)
+	}
+	postSchemaHTML := string(postSchemaBytes)
+	trimIdx := strings.Index(postSchemaHTML, `data-rule-type="trim_space"`)
+	lowerIdx := strings.Index(postSchemaHTML, `data-rule-type="to_lower"`)
+	if trimIdx == -1 || lowerIdx == -1 || trimIdx > lowerIdx {
+		t.Fatalf("expected stacked blocks trim_space followed by to_lower in rendered HTML")
 	}
 
 	// 4. POST /datasets/{id}/jobs to start refinement
