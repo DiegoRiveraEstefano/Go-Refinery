@@ -91,19 +91,6 @@ go test -v -race ./...
 
 ---
 
-## Project Documentation Index
-
-- [DOCS.md](file:///home/diego/Proyectos/Go-Refinery/DOCS.md) & [docs/index.md](file:///home/diego/Proyectos/Go-Refinery/docs/index.md): Documentation structure, templates, and Go Doc conventions.
-- [GUIDELINES.md](file:///home/diego/Proyectos/Go-Refinery/GUIDELINES.md): Hexagonal architecture rules, concurrency, SQLite patterns, and engineering principles.
-- [STYLE_GUIDE.md](file:///home/diego/Proyectos/Go-Refinery/STYLE_GUIDE.md): Coding conventions for Go, SQL, HTML5, CSS3, Unpoly, and Web Components.
-- [DESING.md](file:///home/diego/Proyectos/Go-Refinery/DESING.md): Visual design system, typography, color tokens, semantic HTML styling, and UI patterns.
-- [SECURITY.md](file:///home/diego/Proyectos/Go-Refinery/SECURITY.md): Upload validation, resource limits, SQLite safety, and vulnerability policy.
-- [CONTRIBUTING.md](file:///home/diego/Proyectos/Go-Refinery/CONTRIBUTING.md): Development workflow, commit conventions, and pull request checklist.
-- [AGENTS.md](file:///home/diego/Proyectos/Go-Refinery/AGENTS.md): Context and strict guardrails for AI coding agents.
-- [CHANGELOG.md](file:///home/diego/Proyectos/Go-Refinery/CHANGELOG.md): Version history and release notes.
-
----
-
 ## License
 
 Licensed under the MIT License. See [LICENSE](file:///home/diego/Proyectos/Go-Refinery/LICENSE) for details.
