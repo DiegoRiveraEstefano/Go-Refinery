@@ -5,6 +5,7 @@ import (
 	"fmt"
 	"io"
 	"net/http"
+	"net/url"
 	"path/filepath"
 	"strconv"
 	"strings"
@@ -140,6 +141,44 @@ func (s *Server) handleUploadDataset(w http.ResponseWriter, r *http.Request) {
 	http.Error(w, "no file part found in multipart request", http.StatusBadRequest)
 }
 
+func parseSearchQueryFromRequest(r *http.Request) dataset.SearchQuery {
+	q := r.URL.Query()
+	op := dataset.SearchOperator(strings.TrimSpace(q.Get("op")))
+	if op == "" {
+		op = dataset.OpContains
+	}
+	return dataset.SearchQuery{
+		Query:    strings.TrimSpace(q.Get("q")),
+		Field:    strings.TrimSpace(q.Get("field")),
+		Operator: op,
+		Value:    strings.TrimSpace(q.Get("val")),
+	}
+}
+
+func buildFilterQueryString(sq dataset.SearchQuery) string {
+	if sq.IsEmpty() {
+		return ""
+	}
+	v := url.Values{}
+	if sq.Query != "" {
+		v.Set("q", sq.Query)
+	}
+	if sq.Field != "" {
+		v.Set("field", sq.Field)
+	}
+	if sq.Operator != "" {
+		v.Set("op", string(sq.Operator))
+	}
+	if sq.Value != "" {
+		v.Set("val", sq.Value)
+	}
+	encoded := v.Encode()
+	if encoded == "" {
+		return ""
+	}
+	return "&" + encoded
+}
+
 func (s *Server) handleListRecords(w http.ResponseWriter, r *http.Request, dsID dataset.ID) {
 	ds, err := s.ingest.GetDataset(r.Context(), dsID)
 	if errors.Is(err, dataset.ErrDatasetNotFound) {
@@ -157,18 +196,22 @@ func (s *Server) handleListRecords(w http.ResponseWriter, r *http.Request, dsID 
 
 	limit, _ := strconv.Atoi(r.URL.Query().Get("limit"))
 	offset, _ := strconv.Atoi(r.URL.Query().Get("offset"))
+	searchQuery := parseSearchQueryFromRequest(r)
 
-	records, err := s.refinery.ListRecords(r.Context(), dsID, ports.PageFilter{
+	var (
+		records      []dataset.Record
+		matchedCount int
+		searchErrMsg string
+	)
+
+	records, matchedCount, err = s.refinery.SearchRecords(r.Context(), dsID, searchQuery, ports.PageFilter{
 		Limit:  limit,
 		Offset: offset,
 	})
 	if err != nil {
-		s.log.ErrorContext(r.Context(), "failed to list dataset records",
-			logger.F("dataset_id", dsID),
-			logger.Err(err),
-		)
-		http.Error(w, fmt.Sprintf("loading records: %v", err), http.StatusInternalServerError)
-		return
+		// If the user typed a malformed regex or JSON query, show a helpful message in the UI
+		// rather than a 500 error page.
+		searchErrMsg = err.Error()
 	}
 
 	var jobErrors []job.RowError
@@ -177,15 +220,20 @@ func (s *Server) handleListRecords(w http.ResponseWriter, r *http.Request, dsID 
 	}
 
 	renderPage(w, recordsTmpl, http.StatusOK, map[string]any{
-		"Dataset": ds,
-		"Columns": ds.Schema.Columns,
-		"Records": records,
-		"Errors":  jobErrors,
+		"Dataset":           ds,
+		"Columns":           ds.Schema.Columns,
+		"Records":           records,
+		"Errors":            jobErrors,
+		"Search":            searchQuery,
+		"SearchActive":      !searchQuery.IsEmpty(),
+		"SearchError":       searchErrMsg,
+		"MatchedCount":      matchedCount,
+		"FilterQueryString": buildFilterQueryString(searchQuery),
 	})
 }
 
-// handleExportDataset streams all refined records for a dataset as a downloadable file
-// in CSV, TSV, JSON, or JSONL format.
+// handleExportDataset streams all refined records for a dataset (or the filtered subset
+// if search parameters are present) as a downloadable file in CSV, TSV, JSON, or JSONL format.
 func (s *Server) handleExportDataset(w http.ResponseWriter, r *http.Request, dsID dataset.ID) {
 	ds, err := s.ingest.GetDataset(r.Context(), dsID)
 	if errors.Is(err, dataset.ErrDatasetNotFound) {
@@ -234,16 +282,26 @@ func (s *Server) handleExportDataset(w http.ResponseWriter, r *http.Request, dsI
 		return
 	}
 
+	searchQuery := parseSearchQueryFromRequest(r)
+	if _, err := dataset.CompileSearchQuery(searchQuery); err != nil {
+		http.Error(w, fmt.Sprintf("invalid search filter: %v", err), http.StatusBadRequest)
+		return
+	}
+
 	baseName := strings.TrimSuffix(filepath.Base(ds.OriginalName), filepath.Ext(ds.OriginalName))
 	if baseName == "" {
 		baseName = string(ds.ID)
 	}
-	downloadName := fmt.Sprintf("%s_refined%s", baseName, ext)
+	suffix := "_refined"
+	if !searchQuery.IsEmpty() {
+		suffix = "_filtered"
+	}
+	downloadName := fmt.Sprintf("%s%s%s", baseName, suffix, ext)
 
 	w.Header().Set("Content-Type", contentType)
 	w.Header().Set("Content-Disposition", fmt.Sprintf("attachment; filename=%q", downloadName))
 
-	if err := s.refinery.ExportRecords(r.Context(), dsID, exportFmt, w); err != nil {
+	if err := s.refinery.ExportRecords(r.Context(), dsID, exportFmt, searchQuery, w); err != nil {
 		s.log.ErrorContext(r.Context(), "streaming export failed",
 			logger.F("dataset_id", dsID),
 			logger.F("format", exportFmt),

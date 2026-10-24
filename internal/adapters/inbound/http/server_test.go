@@ -314,21 +314,36 @@ func TestHTTPAdapter_UploadSchemaJobSSEAndExport(t *testing.T) {
 		t.Fatal("did not receive expected SSE progress event")
 	}
 
-	// 6. GET /datasets/{id}/records to inspect cleaned table and export buttons
+	// 6. GET /datasets/{id}/records to inspect cleaned table, search engine UI, and export buttons
 	recResp, err := http.Get(ts.URL + "/datasets/" + dsID + "/records")
 	if err != nil {
 		t.Fatalf("GET /datasets/%s/records failed: %v", dsID, err)
 	}
 	recHTML, _ := io.ReadAll(recResp.Body)
 	_ = recResp.Body.Close()
-	if !strings.Contains(string(recHTML), "alice") {
-		t.Fatalf("expected cleaned record 'alice' in records HTML table, got: %s", string(recHTML))
+	if !strings.Contains(string(recHTML), "alice") || !strings.Contains(string(recHTML), "bob") {
+		t.Fatalf("expected cleaned records 'alice' and 'bob' in records HTML table, got: %s", string(recHTML))
+	}
+	if !strings.Contains(string(recHTML), "<refinery-search-box>") {
+		t.Fatalf("expected <refinery-search-box> search engine in records view")
 	}
 	if !strings.Contains(string(recHTML), "/export?format=csv") {
 		t.Fatalf("expected export toolbar links in records view")
 	}
 
-	// 7. Verify multi-format export endpoints (CSV, TSV, JSON, JSONL)
+	// 7. Test MongoDB-style JSON search in GET /datasets/{id}/records?q=...
+	mongoQuery := url.QueryEscape(`{"id": {"$gt": 1}, "name": {"$regex": "^b"}}`)
+	filteredResp, err := http.Get(ts.URL + "/datasets/" + dsID + "/records?q=" + mongoQuery)
+	if err != nil {
+		t.Fatalf("GET filtered records failed: %v", err)
+	}
+	filteredHTML, _ := io.ReadAll(filteredResp.Body)
+	_ = filteredResp.Body.Close()
+	if !strings.Contains(string(filteredHTML), "bob") || strings.Contains(string(filteredHTML), `<td class="u-mono">alice</td>`) {
+		t.Fatalf("expected Mongo JSON query to match only 'bob', got:\n%s", string(filteredHTML))
+	}
+
+	// 8. Verify multi-format export endpoints (CSV, TSV, JSON, JSONL)
 	exportCases := []struct {
 		format      string
 		contentType string
