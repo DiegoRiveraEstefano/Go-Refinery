@@ -3,58 +3,80 @@
   <header class="l-cluster">
     <div>
       <h2>Schema &amp; Cleaning Pipeline: <code>{{ .Dataset.OriginalName }}</code></h2>
-      <dl class="l-cluster">
-        <div><dt>Dataset ID</dt><dd class="u-mono">{{ .Dataset.ID }}</dd></div>
-        <div><dt>Format</dt><dd class="u-mono">{{ .Dataset.Format }}</dd></div>
-        <div><dt>Status</dt><dd><span class="u-status" data-status="{{ .Dataset.Status }}">{{ .Dataset.Status }}</span></dd></div>
-      </dl>
+      <p>Configure target column types and cleaning rules. Available rules filter automatically based on each column's selected type.</p>
     </div>
+    <dl class="l-cluster">
+      <div><dt>Dataset ID</dt><dd class="u-mono">{{ .Dataset.ID }}</dd></div>
+      <div><dt>Format</dt><dd><span class="u-badge">{{ .Dataset.Format }}</span></dd></div>
+      <div><dt>Status</dt><dd><span class="u-status" data-status="{{ .Dataset.Status }}">{{ .Dataset.Status }}</span></dd></div>
+    </dl>
   </header>
 
   <refinery-schema-editor>
     <form action="/datasets/{{ .Dataset.ID }}/schema" method="post" up-submit up-target="main" class="l-stack">
       <fieldset>
-        <legend>Inferred Columns &amp; Transformation Rules</legend>
+        <legend>Inferred Columns &amp; Type-Specific Transformation Rules</legend>
         <div class="l-table-scroll">
           <table>
             <thead>
               <tr>
                 <th scope="col">#</th>
-                <th scope="col">Original Name</th>
-                <th scope="col">Normalized Key</th>
-                <th scope="col">Inferred Type</th>
+                <th scope="col">Column Header &amp; Key</th>
+                <th scope="col">Inferred</th>
                 <th scope="col">Target Type</th>
-                <th scope="col">Nullable</th>
-                <th scope="col">Cleaning Stages</th>
-                <th scope="col">Sample Values</th>
+                <th scope="col" class="u-text-center">Nullable</th>
+                <th scope="col">Transformation &amp; Validation Rules</th>
+                <th scope="col">Sample Preview</th>
               </tr>
             </thead>
             <tbody>
               {{ range $col := .Columns }}
-              <tr>
-                <td class="u-mono">{{ $col.Index }}</td>
-                <td>{{ $col.OriginalName }}</td>
+              <tr data-col-row="{{ $col.Index }}">
+                <td class="u-mono u-text-right">{{ $col.Index }}</td>
                 <td>
-                  <input type="text" name="col_{{ $col.Index }}_name" value="{{ $col.NormalizedName }}" class="u-mono" required>
+                  <div class="l-stack" data-compact>
+                    <strong>{{ $col.OriginalName }}</strong>
+                    <input type="text" name="col_{{ $col.Index }}_name" value="{{ $col.NormalizedName }}" class="u-mono" aria-label="Normalized key for {{ $col.OriginalName }}" required>
+                  </div>
                 </td>
-                <td class="u-mono">{{ $col.InferredType }}</td>
                 <td>
-                  <select name="col_{{ $col.Index }}_type">
+                  <span class="u-badge u-mono" data-type="{{ $col.InferredType }}">{{ $col.InferredType }}</span>
+                  <small class="u-block">{{ $col.NullCount }} nulls &middot; {{ $col.SampleDistinct }} distinct</small>
+                </td>
+                <td>
+                  <select name="col_{{ $col.Index }}_type" data-role="type-selector" aria-label="Target type for {{ $col.OriginalName }}">
                     {{ range $t := $.AllTypes }}
                     <option value="{{ $t }}" {{ if eq $t $col.TargetType }}selected{{ end }}>{{ $t }}</option>
                     {{ end }}
                   </select>
                 </td>
-                <td>
-                  <input type="checkbox" name="col_{{ $col.Index }}_nullable" value="1" {{ if $col.Nullable }}checked{{ end }}>
+                <td class="u-text-center">
+                  <input type="checkbox" name="col_{{ $col.Index }}_nullable" value="1" aria-label="Nullable" {{ if $col.Nullable }}checked{{ end }}>
                 </td>
                 <td>
-                  <label><input type="checkbox" name="col_{{ $col.Index }}_rules" value="trim_space" {{ if $col.HasTrim }}checked{{ end }}> Trim</label>
-                  <label><input type="checkbox" name="col_{{ $col.Index }}_rules" value="to_lower" {{ if $col.HasLower }}checked{{ end }}> Lower</label>
-                  <label><input type="checkbox" name="col_{{ $col.Index }}_rules" value="to_upper" {{ if $col.HasUpper }}checked{{ end }}> Upper</label>
+                  <div class="l-cluster" data-role="rules-group">
+                    {{ range $rule := $col.AvailableRules }}
+                    <label
+                      data-rule-chip
+                      data-category="{{ $rule.Category }}"
+                      data-supported-types="{{ $rule.SupportedCSV }}"
+                      title="{{ $rule.Description }}"
+                      {{ if not $rule.VisibleInitial }}hidden{{ end }}>
+                      <input
+                        type="checkbox"
+                        name="col_{{ $col.Index }}_rules"
+                        value="{{ $rule.Type }}"
+                        {{ if $rule.Checked }}checked{{ end }}
+                        {{ if not $rule.VisibleInitial }}disabled{{ end }}>
+                      <span>{{ $rule.Label }}</span>
+                    </label>
+                    {{ end }}
+                  </div>
                 </td>
                 <td class="u-mono">
-                  {{ range $col.SampleValues }}<code>{{ . }}</code> {{ end }}
+                  <div class="l-cluster">
+                    {{ range $col.SampleValues }}<code>{{ . }}</code>{{ else }}<small>empty</small>{{ end }}
+                  </div>
                 </td>
               </tr>
               {{ end }}
@@ -62,14 +84,21 @@
           </table>
         </div>
       </fieldset>
-      <div class="l-cluster">
-        <button type="submit">Save Schema &amp; Rules</button>
-      </div>
+
+      <footer class="l-cluster">
+        <button type="submit" data-variant="secondary">Save Schema &amp; Rules</button>
+      </footer>
     </form>
   </refinery-schema-editor>
 
-  <form action="/datasets/{{ .Dataset.ID }}/jobs" method="post" up-submit up-target="main">
-    <button type="submit">Start Asynchronous Refinement Job</button>
-  </form>
+  <section class="l-cluster" aria-label="Launch Refinement">
+    <div>
+      <h3>Ready to Refine?</h3>
+      <p>Launch an asynchronous worker job to stream, validate, and persist all records into SQLite.</p>
+    </div>
+    <form action="/datasets/{{ .Dataset.ID }}/jobs" method="post" up-submit up-target="main">
+      <button type="submit">Start Asynchronous Refinement Job &rarr;</button>
+    </form>
+  </section>
 </article>
 {{ end }}

@@ -1,14 +1,38 @@
 {{ define "content" }}
 <section aria-labelledby="records-heading" class="l-stack">
   <header class="l-cluster">
-    <h2 id="records-heading">Refined Records: <code>{{ .Dataset.OriginalName }}</code></h2>
-    <a href="/datasets/{{ .Dataset.ID }}/schema" up-follow>Configure Schema</a>
+    <div>
+      <h2 id="records-heading">Refined Dataset: <code>{{ .Dataset.OriginalName }}</code></h2>
+      <dl class="l-cluster">
+        <div><dt>Dataset ID</dt><dd class="u-mono">{{ .Dataset.ID }}</dd></div>
+        <div><dt>Source Format</dt><dd><span class="u-badge">{{ .Dataset.Format }}</span></dd></div>
+        <div><dt>Status</dt><dd><span class="u-status" data-status="{{ .Dataset.Status }}">{{ .Dataset.Status }}</span></dd></div>
+        <div><dt>Total Rows</dt><dd class="u-mono">{{ .Dataset.TotalRows }}</dd></div>
+      </dl>
+    </div>
+
+    <div class="l-cluster">
+      <a href="/datasets/{{ .Dataset.ID }}/schema" up-follow data-button data-variant="secondary">Configure Schema &amp; Rules</a>
+    </div>
   </header>
+
+  <fieldset>
+    <legend>Export Cleaned Dataset</legend>
+    <div class="l-cluster">
+      <p>Download all validated and normalized records in your preferred format:</p>
+      <nav aria-label="Export Formats" class="l-cluster">
+        <a href="/datasets/{{ .Dataset.ID }}/export?format=csv" download data-button>Export CSV (.csv)</a>
+        <a href="/datasets/{{ .Dataset.ID }}/export?format=tsv" download data-button data-variant="secondary">Export TSV (.tsv)</a>
+        <a href="/datasets/{{ .Dataset.ID }}/export?format=json" download data-button data-variant="secondary">Export JSON (.json)</a>
+        <a href="/datasets/{{ .Dataset.ID }}/export?format=jsonl" download data-button data-variant="secondary">Export JSONL (.jsonl)</a>
+      </nav>
+    </div>
+  </fieldset>
 
   {{ if .Records }}
   <div class="l-table-scroll">
     <table>
-      <caption>Validated and normalized output rows</caption>
+      <caption>Validated and normalized output rows (showing {{ len .Records }} records)</caption>
       <thead>
         <tr>
           <th scope="col" class="u-text-right">Row #</th>
@@ -30,7 +54,7 @@
     </table>
   </div>
   {{ else }}
-  <p>No refined records available yet. Run a refinement job first.</p>
+  <p>No refined records available yet. Configure your schema rules and run a refinement job first.</p>
   {{ end }}
 
   {{ if .Errors }}
