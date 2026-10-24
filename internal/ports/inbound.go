@@ -67,6 +67,10 @@ type RefineryUseCase interface {
 	// ListRecords returns paginated cleaned records for a refined Dataset.
 	ListRecords(ctx context.Context, datasetID dataset.ID, filter PageFilter) ([]dataset.Record, error)
 
-	// ExportRecords streams all refined records of a Dataset into w using the requested ExportFormat.
-	ExportRecords(ctx context.Context, datasetID dataset.ID, format ExportFormat, w io.Writer) error
+	// SearchRecords evaluates a SearchQuery (text, regex, structured operators, or Mongo-style JSON/DSL)
+	// over a dataset's refined records and returns the paginated slice along with the total matched count.
+	SearchRecords(ctx context.Context, datasetID dataset.ID, query dataset.SearchQuery, filter PageFilter) ([]dataset.Record, int, error)
+
+	// ExportRecords streams refined records of a Dataset (filtered by query if non-empty) into w using the requested ExportFormat.
+	ExportRecords(ctx context.Context, datasetID dataset.ID, format ExportFormat, query dataset.SearchQuery, w io.Writer) error
 }
