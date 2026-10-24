@@ -17,11 +17,11 @@ The HTTP inbound adapter is split into dedicated router/view files to keep handl
 
 | File | Responsibility |
 | :--- | :--- |
-| [`server.go`](file:///home/diego/Proyectos/Go-Refinery/internal/adapters/inbound/http/server.go) | Server struct, configuration (`SetMaxUploadBytes`), and top-level route registration (`web.StaticFS`, dashboard, datasets, jobs). |
-| [`middleware.go`](file:///home/diego/Proyectos/Go-Refinery/internal/adapters/inbound/http/middleware.go) | Security headers middleware (`Content-Security-Policy`, `X-Content-Type-Options`, `X-Frame-Options`, `Referrer-Policy`). |
+| [`server.go`](file:///home/diego/Proyectos/Go-Refinery/internal/adapters/inbound/http/server.go) | Server struct, configuration (`SetMaxUploadBytes`, `SetLogger`), and top-level route registration (`web.StaticFS`, dashboard, datasets, jobs). |
+| [`middleware.go`](file:///home/diego/Proyectos/Go-Refinery/internal/adapters/inbound/http/middleware.go) | Request correlation (`X-Request-ID`), structured HTTP access logging, panic recovery, `http.Flusher` delegation, and security headers (`Content-Security-Policy`, `X-Content-Type-Options`, `X-Frame-Options`, `Referrer-Policy`). |
 | [`templates.go`](file:///home/diego/Proyectos/Go-Refinery/internal/adapters/inbound/http/templates.go) | Parses standalone HTML files from `web.TemplatesFS` (`embed.FS`) with `html/template`. |
 | [`dashboard_router.go`](file:///home/diego/Proyectos/Go-Refinery/internal/adapters/inbound/http/dashboard_router.go) | Handles `GET /`, `GET /healthz`, and the main upload/datasets dashboard view. |
-| [`datasets_router.go`](file:///home/diego/Proyectos/Go-Refinery/internal/adapters/inbound/http/datasets_router.go) | Handles `POST /datasets` (streaming multipart upload) and `GET /datasets/{id}/records` (cleaned output & row errors). |
+| [`datasets_router.go`](file:///home/diego/Proyectos/Go-Refinery/internal/adapters/inbound/http/datasets_router.go) | Handles `POST /datasets` (streaming multipart upload), `GET /datasets/{id}/records` (cleaned output & row errors), and `GET /datasets/{id}/export` (multi-format download). |
 | [`schema_router.go`](file:///home/diego/Proyectos/Go-Refinery/internal/adapters/inbound/http/schema_router.go) | Handles `GET /datasets/{id}/schema` and `POST /datasets/{id}/schema` for configuring column types and cleaning rules. |
 | [`jobs_router.go`](file:///home/diego/Proyectos/Go-Refinery/internal/adapters/inbound/http/jobs_router.go) | Handles `POST /datasets/{id}/jobs`, `GET /jobs/{id}`, and `GET /jobs/{id}/events` (SSE stream via `http.Flusher`). |
 
@@ -40,4 +40,5 @@ The HTTP inbound adapter is split into dedicated router/view files to keep handl
 | `POST /datasets/{id}/jobs` | `jobs_router.go` | Enqueues an asynchronous refinement job and returns `202 Accepted` (`progress.html`). |
 | `GET /jobs/{id}` | `jobs_router.go` | Renders the current status and `<refinery-progress>` widget for a job. |
 | `GET /jobs/{id}/events` | `jobs_router.go` | Streams `event: progress` JSON snapshots over `text/event-stream` using `http.Flusher`. |
-| `GET /datasets/{id}/records` | `datasets_router.go` | Renders cleaned `dataset_records` and expandable `<details>` of `job_errors` (`records.html`). |
+| `GET /datasets/{id}/records` | `datasets_router.go` | Renders cleaned `dataset_records`, expandable `<details>` of `job_errors`, and the multi-format export toolbar (`records.html`). |
+| `GET /datasets/{id}/export?format={csv\|tsv\|json\|jsonl}` | `datasets_router.go` | Streams all cleaned records for the dataset as a downloadable file (`Content-Disposition: attachment`) in CSV, TSV, indented JSON array, or NDJSON/JSONL format. |
