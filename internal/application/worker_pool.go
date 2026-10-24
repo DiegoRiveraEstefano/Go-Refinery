@@ -10,20 +10,23 @@ import (
 	"github.com/diego/go-refinery/internal/domain/dataset"
 	"github.com/diego/go-refinery/internal/domain/job"
 	"github.com/diego/go-refinery/internal/domain/pipeline"
+	"github.com/diego/go-refinery/internal/logger"
 )
 
 const sseThrottleInterval = 250 * time.Millisecond
 
-func (s *RefineryService) workerLoop(ctx context.Context, _ int) {
+func (s *RefineryService) workerLoop(ctx context.Context, workerID int) {
+	s.log.Debug("worker goroutine started", logger.F("worker_id", workerID))
 	for {
 		select {
 		case <-ctx.Done():
+			s.log.Debug("worker goroutine stopping", logger.F("worker_id", workerID))
 			return
 		case jobID, ok := <-s.jobQueue:
 			if !ok {
 				return
 			}
-			s.processJob(ctx, jobID)
+			s.processJob(ctx, workerID, jobID)
 		}
 	}
 }
@@ -31,9 +34,14 @@ func (s *RefineryService) workerLoop(ctx context.Context, _ int) {
 // processJob executes a single refinement job end-to-end: compiling column pipelines,
 // streaming rows in O(1) memory, writing 500-row batches to SQLite, and publishing
 // throttled SSE telemetry events.
-func (s *RefineryService) processJob(ctx context.Context, jobID job.ID) {
+func (s *RefineryService) processJob(ctx context.Context, workerID int, jobID job.ID) {
 	j, err := s.jobs.GetByID(ctx, jobID)
 	if err != nil {
+		s.log.Error("worker failed to load queued job",
+			logger.F("worker_id", workerID),
+			logger.F("job_id", jobID),
+			logger.Err(err),
+		)
 		return
 	}
 
@@ -70,6 +78,13 @@ func (s *RefineryService) processJob(ctx context.Context, jobID job.ID) {
 	_ = s.datasets.UpdateStatus(ctx, ds.ID, dataset.StatusProcessing, ds.TotalRows)
 	s.publishEvent(j, startTime, "Refinement started")
 
+	s.log.Info("worker started refinement job",
+		logger.F("worker_id", workerID),
+		logger.F("job_id", j.ID),
+		logger.F("dataset_id", ds.ID),
+		logger.F("format", ds.Format),
+	)
+
 	batchSize := s.batchSize
 	if batchSize <= 0 {
 		batchSize = defaultBatchSize
@@ -78,12 +93,20 @@ func (s *RefineryService) processJob(ctx context.Context, jobID job.ID) {
 	recordsBatch := make([]dataset.Record, 0, batchSize)
 	errorsBatch := make([]job.RowError, 0, 64)
 	lastBroadcast := startTime
-	var rowNumber int64
+	var (
+		rowNumber   int64
+		droppedRows int64
+	)
 
 	flushBatch := func() error {
 		if len(recordsBatch) == 0 && len(errorsBatch) == 0 {
 			return nil
 		}
+		s.log.Debug("flushing refinement batch to sqlite",
+			logger.F("job_id", j.ID),
+			logger.F("records_in_batch", len(recordsBatch)),
+			logger.F("errors_in_batch", len(errorsBatch)),
+		)
 		if err := s.records.WriteBatch(ctx, j.ID, recordsBatch, errorsBatch); err != nil {
 			return fmt.Errorf("writing record batch: %w", err)
 		}
@@ -136,7 +159,9 @@ func (s *RefineryService) processJob(ctx context.Context, jobID job.ID) {
 			if len(rowErrs) > 0 {
 				j.ErrorRows++
 				errorsBatch = append(errorsBatch, rowErrs...)
-			} else if !dropped {
+			} else if dropped {
+				droppedRows++
+			} else {
 				j.ValidRows++
 				recordsBatch = append(recordsBatch, rec)
 			}
@@ -168,6 +193,17 @@ func (s *RefineryService) processJob(ctx context.Context, jobID job.ID) {
 	_ = s.jobs.UpdateProgress(ctx, j)
 	_ = s.datasets.UpdateStatus(ctx, ds.ID, dataset.StatusCompleted, j.TotalRows)
 	s.publishEvent(j, startTime, "Refinement completed successfully")
+
+	s.log.Info("worker completed refinement job",
+		logger.F("worker_id", workerID),
+		logger.F("job_id", j.ID),
+		logger.F("dataset_id", ds.ID),
+		logger.F("processed_rows", j.ProcessedRows),
+		logger.F("valid_rows", j.ValidRows),
+		logger.F("error_rows", j.ErrorRows),
+		logger.F("dropped_rows", droppedRows),
+		logger.F("duration_ms", finishTime.Sub(startTime).Milliseconds()),
+	)
 }
 
 func buildColumnPipelines(schema dataset.Schema) ([]pipeline.ColumnPipeline, error) {
@@ -259,6 +295,14 @@ func (s *RefineryService) failJob(ctx context.Context, j *job.Job, startTime tim
 	_ = s.jobs.UpdateProgress(ctx, j)
 	_ = s.datasets.UpdateStatus(ctx, j.DatasetID, dataset.StatusFailed, j.ProcessedRows)
 	s.publishEvent(j, startTime, msg)
+
+	s.log.Error("refinement job failed",
+		logger.F("job_id", j.ID),
+		logger.F("dataset_id", j.DatasetID),
+		logger.F("processed_rows", j.ProcessedRows),
+		logger.F("error_rows", j.ErrorRows),
+		logger.F("reason", msg),
+	)
 }
 
 func (s *RefineryService) cancelJob(j *job.Job, startTime time.Time, msg string) {
@@ -272,6 +316,13 @@ func (s *RefineryService) cancelJob(j *job.Job, startTime time.Time, msg string)
 	_ = s.jobs.UpdateProgress(saveCtx, j)
 	_ = s.datasets.UpdateStatus(saveCtx, j.DatasetID, dataset.StatusFailed, j.ProcessedRows)
 	s.publishEvent(j, startTime, msg)
+
+	s.log.Warn("refinement job cancelled",
+		logger.F("job_id", j.ID),
+		logger.F("dataset_id", j.DatasetID),
+		logger.F("processed_rows", j.ProcessedRows),
+		logger.F("reason", msg),
+	)
 }
 
 func (s *RefineryService) publishEvent(j *job.Job, startTime time.Time, message string) {

@@ -9,6 +9,7 @@ import (
 
 	"github.com/diego/go-refinery/internal/domain/dataset"
 	"github.com/diego/go-refinery/internal/domain/job"
+	"github.com/diego/go-refinery/internal/logger"
 	"github.com/diego/go-refinery/internal/ports"
 )
 
@@ -31,6 +32,7 @@ type RefineryService struct {
 	jobQueue  chan job.ID
 	batchSize int
 	wg        sync.WaitGroup
+	log       *logger.Logger
 }
 
 // NewRefineryService creates a RefineryService with a bounded internal job queue.
@@ -55,6 +57,14 @@ func NewRefineryService(
 		broker:    broker,
 		jobQueue:  make(chan job.ID, queueSize),
 		batchSize: defaultBatchSize,
+		log:       logger.Default().With(logger.F("component", "refinery_service")),
+	}
+}
+
+// SetLogger overrides the default structured logger on RefineryService.
+func (s *RefineryService) SetLogger(l *logger.Logger) {
+	if l != nil {
+		s.log = l.With(logger.F("component", "refinery_service"))
 	}
 }
 
@@ -74,6 +84,11 @@ func (s *RefineryService) StartWorkers(ctx context.Context, n int) {
 	if n < 1 {
 		n = 1
 	}
+
+	s.log.Info("starting background refinement worker pool",
+		logger.F("workers", n),
+		logger.F("batch_size", s.batchSize),
+	)
 
 	for i := 0; i < n; i++ {
 		s.wg.Add(1)
@@ -98,6 +113,10 @@ func (s *RefineryService) StartRefinementJob(ctx context.Context, datasetID data
 
 	if latest, err := s.jobs.GetLatestByDataset(ctx, datasetID); err == nil && latest != nil {
 		if !latest.IsTerminal() {
+			s.log.WarnContext(ctx, "rejected duplicate job start while active job exists",
+				logger.F("dataset_id", datasetID),
+				logger.F("active_job_id", latest.ID),
+			)
 			return nil, job.ErrJobAlreadyActive
 		}
 	}
@@ -118,8 +137,17 @@ func (s *RefineryService) StartRefinementJob(ctx context.Context, datasetID data
 	}
 
 	if err := s.jobs.Create(ctx, j); err != nil {
+		s.log.ErrorContext(ctx, "failed to create job record in sqlite",
+			logger.F("dataset_id", datasetID),
+			logger.Err(err),
+		)
 		return nil, fmt.Errorf("creating job record: %w", err)
 	}
+
+	s.log.InfoContext(ctx, "enqueued asynchronous refinement job",
+		logger.F("job_id", j.ID),
+		logger.F("dataset_id", ds.ID),
+	)
 
 	s.publishEvent(j, time.Now().UTC(), "Job queued for refinement")
 
