@@ -8,6 +8,9 @@
         <div><dt>Source Format</dt><dd><span class="u-badge">{{ .Dataset.Format }}</span></dd></div>
         <div><dt>Status</dt><dd><span class="u-status" data-status="{{ .Dataset.Status }}">{{ .Dataset.Status }}</span></dd></div>
         <div><dt>Total Rows</dt><dd class="u-mono">{{ .Dataset.TotalRows }}</dd></div>
+        {{ if .SearchActive }}
+        <div><dt>Matched Rows</dt><dd class="u-mono">{{ .MatchedCount }}</dd></div>
+        {{ end }}
       </dl>
     </div>
 
@@ -16,15 +19,99 @@
     </div>
   </header>
 
+  <refinery-search-box>
+    <form action="/datasets/{{ .Dataset.ID }}/records" method="get" up-target="main" class="l-stack">
+      <fieldset class="l-stack">
+        <legend>Query &amp; Filter Engine (Text, Regex, Operators &amp; Mongo JSON)</legend>
+
+        <div class="l-search-bar">
+          <input
+            type="search"
+            name="q"
+            data-role="query-input"
+            value="{{ .Search.Query }}"
+            placeholder='Text, /regex/i, DSL (age >= 25 AND status = active) or Mongo JSON ({"age": {"$gt": 25}})'
+            aria-label="Search query, regular expression, or Mongo JSON filter"
+            class="u-mono"
+          >
+          <button type="submit">Run Query</button>
+          {{ if .SearchActive }}
+          <a href="/datasets/{{ .Dataset.ID }}/records" up-follow data-button data-variant="secondary">Clear Filters</a>
+          {{ end }}
+        </div>
+
+        <div class="l-filter-builder">
+          <label>
+            <small>Field</small>
+            <select name="field" data-role="builder-field">
+              <option value="*" {{ if or (eq .Search.Field "") (eq .Search.Field "*") }}selected{{ end }}>* (Any Column)</option>
+              {{ range .Columns }}
+              <option value="{{ .NormalizedName }}" {{ if eq $.Search.Field .NormalizedName }}selected{{ end }}>{{ .NormalizedName }} ({{ .TargetType }})</option>
+              {{ end }}
+            </select>
+          </label>
+
+          <label>
+            <small>Operator</small>
+            <select name="op" data-role="builder-op">
+              <option value="$contains" {{ if eq (printf "%s" .Search.Operator) "$contains" }}selected{{ end }}>$contains (Text contains)</option>
+              <option value="$regex" {{ if eq (printf "%s" .Search.Operator) "$regex" }}selected{{ end }}>$regex (Regular expression)</option>
+              <option value="$eq" {{ if eq (printf "%s" .Search.Operator) "$eq" }}selected{{ end }}>$eq (Equals ==)</option>
+              <option value="$ne" {{ if eq (printf "%s" .Search.Operator) "$ne" }}selected{{ end }}>$ne (Not equals !=)</option>
+              <option value="$gt" {{ if eq (printf "%s" .Search.Operator) "$gt" }}selected{{ end }}>$gt (Greater than &gt;)</option>
+              <option value="$gte" {{ if eq (printf "%s" .Search.Operator) "$gte" }}selected{{ end }}>$gte (Greater or equal &gt;=)</option>
+              <option value="$lt" {{ if eq (printf "%s" .Search.Operator) "$lt" }}selected{{ end }}>$lt (Less than &lt;)</option>
+              <option value="$lte" {{ if eq (printf "%s" .Search.Operator) "$lte" }}selected{{ end }}>$lte (Less or equal &lt;=)</option>
+              <option value="$in" {{ if eq (printf "%s" .Search.Operator) "$in" }}selected{{ end }}>$in (Comma-separated list)</option>
+              <option value="$exists" {{ if eq (printf "%s" .Search.Operator) "$exists" }}selected{{ end }}>$exists (true / false)</option>
+            </select>
+          </label>
+
+          <label class="l-filter-value">
+            <small>Value / Pattern</small>
+            <input
+              type="text"
+              name="val"
+              data-role="builder-val"
+              value="{{ .Search.Value }}"
+              placeholder="Value, pattern, or a,b,c for $in"
+              class="u-mono"
+            >
+          </label>
+
+          <button type="button" data-variant="secondary" data-role="append-mongo" title="Append field condition into the Mongo JSON query bar">
+            + Add to Mongo JSON
+          </button>
+        </div>
+
+        <div class="l-cluster">
+          <small>
+            Examples:
+            <code>/^[a-z0-9]+@/i</code>
+            <code>col &gt;= 100 AND status != draft</code>
+            <code>{"col": {"$regex": "^A", "$ne": "Admin"}}</code>
+            <code>{"$or": [{"a": 1}, {"b": 2}]}</code>
+          </small>
+        </div>
+
+        {{ if .SearchError }}
+        <p role="alert" class="u-alert-error">
+          <strong>Query Syntax Error:</strong> <code>{{ .SearchError }}</code>
+        </p>
+        {{ end }}
+      </fieldset>
+    </form>
+  </refinery-search-box>
+
   <fieldset>
-    <legend>Export Cleaned Dataset</legend>
+    <legend>Export Dataset {{ if .SearchActive }}(Filtered Subset: {{ .MatchedCount }} rows){{ else }}(All Cleaned Records){{ end }}</legend>
     <div class="l-cluster">
-      <p>Download all validated and normalized records in your preferred format:</p>
+      <p>Download {{ if .SearchActive }}the current search results{{ else }}all validated and normalized records{{ end }} in your preferred format:</p>
       <nav aria-label="Export Formats" class="l-cluster">
-        <a href="/datasets/{{ .Dataset.ID }}/export?format=csv" download data-button>Export CSV (.csv)</a>
-        <a href="/datasets/{{ .Dataset.ID }}/export?format=tsv" download data-button data-variant="secondary">Export TSV (.tsv)</a>
-        <a href="/datasets/{{ .Dataset.ID }}/export?format=json" download data-button data-variant="secondary">Export JSON (.json)</a>
-        <a href="/datasets/{{ .Dataset.ID }}/export?format=jsonl" download data-button data-variant="secondary">Export JSONL (.jsonl)</a>
+        <a href="/datasets/{{ .Dataset.ID }}/export?format=csv{{ .FilterQueryString }}" download data-button>Export CSV (.csv)</a>
+        <a href="/datasets/{{ .Dataset.ID }}/export?format=tsv{{ .FilterQueryString }}" download data-button data-variant="secondary">Export TSV (.tsv)</a>
+        <a href="/datasets/{{ .Dataset.ID }}/export?format=json{{ .FilterQueryString }}" download data-button data-variant="secondary">Export JSON (.json)</a>
+        <a href="/datasets/{{ .Dataset.ID }}/export?format=jsonl{{ .FilterQueryString }}" download data-button data-variant="secondary">Export JSONL (.jsonl)</a>
       </nav>
     </div>
   </fieldset>
@@ -32,7 +119,13 @@
   {{ if .Records }}
   <div class="l-table-scroll">
     <table>
-      <caption>Validated and normalized output rows (showing {{ len .Records }} records)</caption>
+      <caption>
+        {{ if .SearchActive }}
+        Showing {{ len .Records }} of {{ .MatchedCount }} matched rows (filtered from {{ .Dataset.TotalRows }} total records)
+        {{ else }}
+        Validated and normalized output rows (showing {{ len .Records }} records)
+        {{ end }}
+      </caption>
       <thead>
         <tr>
           <th scope="col" class="u-text-right">Row #</th>
@@ -54,7 +147,11 @@
     </table>
   </div>
   {{ else }}
+  {{ if .SearchActive }}
+  <p>No records matched your search criteria. Try broadening your filter or clearing the query.</p>
+  {{ else }}
   <p>No refined records available yet. Configure your schema rules and run a refinement job first.</p>
+  {{ end }}
   {{ end }}
 
   {{ if .Errors }}

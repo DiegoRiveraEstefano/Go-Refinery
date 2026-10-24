@@ -142,11 +142,13 @@ select {
   background-color: var(--color-bg-surface);
   border: 1px solid var(--color-border);
   border-radius: var(--radius-sm);
-  padding: 0.4rem 0.65rem;
+  padding: 0.45rem 0.65rem;
   transition: border-color 120ms ease, box-shadow 120ms ease;
 }
 
 input[type="text"]:focus,
+input[type="number"]:focus,
+input[type="search"]:focus,
 select:focus {
   outline: none;
   border-color: var(--color-accent);
@@ -178,28 +180,36 @@ a[data-button] {
   padding: 0.6rem 1.15rem;
   cursor: pointer;
   box-shadow: var(--shadow-sm);
+  text-decoration: none;
   transition: background-color 120ms ease, transform 80ms ease, box-shadow 120ms ease;
 }
 
 button:hover,
-input[type="submit"]:hover {
+input[type="submit"]:hover,
+a[data-button]:hover {
   background-color: var(--color-accent-hover);
+  color: var(--color-text-on-accent);
+  text-decoration: none;
 }
 
 button:active,
-input[type="submit"]:active {
+input[type="submit"]:active,
+a[data-button]:active {
   transform: translateY(1px);
 }
 
-button[data-variant="secondary"] {
+button[data-variant="secondary"],
+a[data-button][data-variant="secondary"] {
   background-color: var(--color-bg-surface);
   color: var(--color-text-primary);
   border-color: var(--color-border);
 }
 
-button[data-variant="secondary"]:hover {
+button[data-variant="secondary"]:hover,
+a[data-button][data-variant="secondary"]:hover {
   background-color: var(--color-bg-hover);
   border-color: var(--color-accent);
+  color: var(--color-text-primary);
 }
 
 /* ==========================================================================
@@ -343,6 +353,10 @@ refinery-dropzone label {
   cursor: pointer;
 }
 
+refinery-search-box {
+  display: block;
+}
+
 label[data-rule-chip] {
   display: inline-flex;
   align-items: center;
@@ -403,6 +417,34 @@ label[data-rule-chip][data-active="true"] {
   gap: var(--space-2);
 }
 
+.l-search-bar {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: var(--space-2);
+}
+
+.l-search-bar input[type="search"] {
+  flex: 1 1 24rem;
+}
+
+.l-filter-builder {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: flex-end;
+  gap: var(--space-3);
+}
+
+.l-filter-builder > label {
+  display: flex;
+  flex-direction: column;
+  gap: 0.25rem;
+}
+
+.l-filter-value {
+  flex: 1 1 14rem;
+}
+
 .l-table-scroll {
   width: 100%;
   overflow-x: auto;
@@ -419,6 +461,15 @@ label[data-rule-chip][data-active="true"] {
 .u-text-right { text-align: right; }
 .u-text-center { text-align: center; }
 .u-block { display: block; }
+
+.u-alert-error {
+  background-color: var(--color-danger-bg);
+  border: 1px solid var(--color-danger-border);
+  color: var(--color-danger);
+  border-radius: var(--radius-sm);
+  padding: var(--space-2) var(--space-3);
+  font-size: var(--text-sm);
+}
 
 .u-badge {
   display: inline-block;

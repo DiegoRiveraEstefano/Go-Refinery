@@ -104,6 +104,76 @@ class RefinerySchemaEditor extends HTMLElement {
   }
 }
 
+class RefinerySearchBox extends HTMLElement {
+  connectedCallback() {
+    const appendBtn = this.querySelector('button[data-role="append-mongo"]');
+    const queryInput = this.querySelector('input[data-role="query-input"]');
+    const fieldSelect = this.querySelector('select[data-role="builder-field"]');
+    const opSelect = this.querySelector('select[data-role="builder-op"]');
+    const valInput = this.querySelector('input[data-role="builder-val"]');
+
+    if (appendBtn && queryInput && fieldSelect && opSelect && valInput) {
+      this.onAppendClick = () => {
+        const field = fieldSelect.value === "*" ? "" : fieldSelect.value;
+        const op = opSelect.value || "$contains";
+        const rawVal = valInput.value.trim();
+        if (!field) {
+          fieldSelect.focus();
+          return;
+        }
+        if (!rawVal && op !== "$exists") {
+          valInput.focus();
+          return;
+        }
+
+        let currentDoc = {};
+        const existing = queryInput.value.trim();
+        if (existing.startsWith("{") && existing.endsWith("}")) {
+          try {
+            currentDoc = JSON.parse(existing);
+          } catch (_) {
+            currentDoc = {};
+          }
+        }
+
+        let parsedVal = rawVal;
+        if (op === "$in") {
+          parsedVal = rawVal
+            .split(",")
+            .map((s) => s.trim())
+            .filter(Boolean);
+        } else if (op === "$exists") {
+          parsedVal = rawVal.toLowerCase() !== "false" && rawVal !== "0";
+        } else if (rawVal !== "" && !Number.isNaN(Number(rawVal)) && op !== "$regex" && op !== "$contains") {
+          parsedVal = Number(rawVal);
+        }
+
+        if (
+          typeof currentDoc[field] === "object" &&
+          currentDoc[field] !== null &&
+          !Array.isArray(currentDoc[field])
+        ) {
+          currentDoc[field][op] = parsedVal;
+        } else {
+          currentDoc[field] = { [op]: parsedVal };
+        }
+
+        queryInput.value = JSON.stringify(currentDoc);
+        valInput.value = "";
+      };
+
+      appendBtn.addEventListener("click", this.onAppendClick);
+    }
+  }
+
+  disconnectedCallback() {
+    const appendBtn = this.querySelector('button[data-role="append-mongo"]');
+    if (appendBtn && this.onAppendClick) {
+      appendBtn.removeEventListener("click", this.onAppendClick);
+    }
+  }
+}
+
 class RefineryProgress extends HTMLElement {
   connectedCallback() {
     const sseUrl = this.getAttribute("sse-url");
@@ -157,4 +227,5 @@ class RefineryProgress extends HTMLElement {
 
 customElements.define("refinery-dropzone", RefineryDropzone);
 customElements.define("refinery-schema-editor", RefinerySchemaEditor);
+customElements.define("refinery-search-box", RefinerySearchBox);
 customElements.define("refinery-progress", RefineryProgress);
