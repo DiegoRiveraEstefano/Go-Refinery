@@ -24,6 +24,16 @@ type PageFilter struct {
 	Offset int
 }
 
+// ExportFormat represents a supported output format for exporting refined records.
+type ExportFormat string
+
+const (
+	ExportCSV   ExportFormat = "csv"
+	ExportJSON  ExportFormat = "json"
+	ExportJSONL ExportFormat = "jsonl"
+	ExportTSV   ExportFormat = "tsv"
+)
+
 // IngestUseCase defines the primary port for uploading raw datasets and managing metadata.
 type IngestUseCase interface {
 	// UploadAndInfer streams an uploaded file to storage, samples initial rows,
@@ -43,7 +53,7 @@ type SchemaUseCase interface {
 	UpdateSchema(ctx context.Context, datasetID dataset.ID, schema dataset.Schema) error
 }
 
-// RefineryUseCase defines the primary port for starting, monitoring, and querying refinement jobs.
+// RefineryUseCase defines the primary port for starting, monitoring, querying, and exporting refinement jobs.
 type RefineryUseCase interface {
 	// StartRefinementJob creates a QUEUED job and schedules it on the background worker pool.
 	StartRefinementJob(ctx context.Context, datasetID dataset.ID) (*job.Job, error)
@@ -56,4 +66,7 @@ type RefineryUseCase interface {
 
 	// ListRecords returns paginated cleaned records for a refined Dataset.
 	ListRecords(ctx context.Context, datasetID dataset.ID, filter PageFilter) ([]dataset.Record, error)
+
+	// ExportRecords streams all refined records of a Dataset into w using the requested ExportFormat.
+	ExportRecords(ctx context.Context, datasetID dataset.ID, format ExportFormat, w io.Writer) error
 }
